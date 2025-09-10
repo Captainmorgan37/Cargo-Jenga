@@ -147,45 +147,45 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
         name='Cargo Hold'
     ))
 
-if container_type == "CJ" and interior is not None:
-    r = interior["restricted"]
-
-    # Restricted block is at the FRONT-LEFT corner (from door view)
-    x0, y0, z0 = 0, cargo_W - r["width"], 0
-    x1, y1, z1 = r["depth"], cargo_W, interior["height"]
-
-    # 8 vertices of the block
-    vertices = [
-        [x0, y0, z0],
-        [x1, y0, z0],
-        [x1, y1, z0],
-        [x0, y1, z0],
-        [x0, y0, z1],
-        [x1, y0, z1],
-        [x1, y1, z1],
-        [x0, y1, z1]
-    ]
-
-    x, y, z = zip(*vertices)
-
-    # Define faces explicitly (each face is a quad, split into 2 triangles)
-    faces = [
-        (0,1,2), (0,2,3),   # bottom
-        (4,5,6), (4,6,7),   # top
-        (0,1,5), (0,5,4),   # front
-        (2,3,7), (2,7,6),   # back
-        (1,2,6), (1,6,5),   # right
-        (0,3,7), (0,7,4)    # left
-    ]
-    i, j, k = zip(*faces)
-
-    fig.add_trace(go.Mesh3d(
-        x=x, y=y, z=z,
-        i=i, j=j, k=k,
-        color='gray',
-        opacity=0.4,
-        name='Restricted Area'
-    ))
+    if container_type == "CJ" and interior is not None:
+        r = interior["restricted"]
+    
+        # Restricted block is at the FRONT-LEFT corner (from door view)
+        x0, y0, z0 = 0, cargo_W - r["width"], 0
+        x1, y1, z1 = r["depth"], cargo_W, interior["height"]
+    
+        # 8 vertices of the block
+        vertices = [
+            [x0, y0, z0],
+            [x1, y0, z0],
+            [x1, y1, z0],
+            [x0, y1, z0],
+            [x0, y0, z1],
+            [x1, y0, z1],
+            [x1, y1, z1],
+            [x0, y1, z1]
+        ]
+    
+        x, y, z = zip(*vertices)
+    
+        # Define faces explicitly (each face is a quad, split into 2 triangles)
+        faces = [
+            (0,1,2), (0,2,3),   # bottom
+            (4,5,6), (4,6,7),   # top
+            (0,1,5), (0,5,4),   # front
+            (2,3,7), (2,7,6),   # back
+            (1,2,6), (1,6,5),   # right
+            (0,3,7), (0,7,4)    # left
+        ]
+        i, j, k = zip(*faces)
+    
+        fig.add_trace(go.Mesh3d(
+            x=x, y=y, z=z,
+            i=i, j=j, k=k,
+            color='gray',
+            opacity=0.4,
+            name='Restricted Area'
+        ))
 
 
     # Add baggage
@@ -306,5 +306,6 @@ if st.session_state["baggage_list"]:
                 cargo_dims = (container["interior"]["depth_max"], container["interior"]["width_max"], container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
+
 
 
