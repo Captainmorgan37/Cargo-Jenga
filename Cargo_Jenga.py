@@ -62,24 +62,9 @@ def fits_inside(box_dims, interior, container_type):
                 return True
     return False
 
-def cargo_volume(container_type, interior):
-    if container_type == "CJ":
-        total = interior["height"] * interior["depth"] * interior["width"]
-        restricted = interior["height"] * interior["restricted"]["depth"] * interior["restricted"]["width"]
-        return total - restricted
-    elif container_type == "Legacy":
-        front = interior["height"] * interior["depth_min"] * interior["width_max"]
-        back = interior["height"] * (interior["depth_max"] - interior["depth_min"]) * interior["width_min"]
-        return front + back
-
 def box_volume(dims):
     l, w, h = dims
     return l * w * h
-
-def check_total_fit(baggage_list, container, container_type):
-    total_baggage = sum(box_volume(item["Dims"]) for item in baggage_list)
-    cargo_cap = cargo_volume(container_type, container["interior"])
-    return total_baggage, cargo_cap, total_baggage <= cargo_cap
 
 # ----------------- Greedy 3D Packing -----------------
 def fits_in_space(box_dims, space_dims):
@@ -165,14 +150,23 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
 
     # Cargo hold for CJ
     if container_type == "CJ":
-        fig.add_trace(go.Scatter3d(
-            x=[0, cargo_L, cargo_L, 0, 0, 0, cargo_L, cargo_L],
-            y=[0, 0, cargo_W, cargo_W, 0, 0, cargo_W, cargo_W],
-            z=[0, 0, 0, 0, cargo_H, cargo_H, cargo_H, cargo_H],
-            mode='lines',
-            line=dict(color='black', width=4),
-            name='Cargo Hold'
-        ))
+        # Draw explicit edges (12) instead of diagonal
+        corners = [
+            (0,0,0), (cargo_L,0,0), (cargo_L,cargo_W,0), (0,cargo_W,0),   # bottom
+            (0,0,cargo_H), (cargo_L,0,cargo_H), (cargo_L,cargo_W,cargo_H), (0,cargo_W,cargo_H) # top
+        ]
+        edges = [
+            (0,1),(1,2),(2,3),(3,0),  # bottom rectangle
+            (4,5),(5,6),(6,7),(7,4),  # top rectangle
+            (0,4),(1,5),(2,6),(3,7)   # verticals
+        ]
+        for e in edges:
+            x = [corners[e[0]][0], corners[e[1]][0]]
+            y = [corners[e[0]][1], corners[e[1]][1]]
+            z = [corners[e[0]][2], corners[e[1]][2]]
+            fig.add_trace(go.Scatter3d(x=x,y=y,z=z,mode='lines',
+                                       line=dict(color='black',width=4),
+                                       name='Cargo Hold'))
 
         # Restricted block
         r = interior["restricted"]
@@ -184,12 +178,10 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
             [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]
         ]
         x, y, z = zip(*vertices)
-
         faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
                  (0,1,5),(0,5,4),(2,3,7),(2,7,6),
                  (1,2,6),(1,6,5),(0,3,7),(0,7,4)]
         i, j, k = zip(*faces)
-
         fig.add_trace(go.Mesh3d(
             x=x, y=y, z=z,
             i=i, j=j, k=k,
@@ -209,12 +201,10 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
             [dmax, (wmax+wmin)//2, h], [0, (wmax+wmin)//2, h]
         ]
         x, y, z = zip(*vertices)
-
         faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
                  (0,1,5),(0,5,4),(1,2,6),(1,6,5),
                  (2,3,7),(2,7,6),(3,0,4),(3,4,7)]
         i, j, k = zip(*faces)
-
         fig.add_trace(go.Mesh3d(
             x=x, y=y, z=z,
             i=i, j=j, k=k,
@@ -297,8 +287,9 @@ if st.session_state["baggage_list"]:
         st.write("### Fit Results")
         st.table(pd.DataFrame(results))
 
-
-        success, placements = greedy_3d_packing(st.session_state["baggage_list"], container_choice, container["interior"])
+        success, placements = greedy_3d_packing(
+            st.session_state["baggage_list"], container_choice, container["interior"]
+        )
         st.write("### Overall Cargo Packing Feasibility")
         if success:
             st.success("✅ Packing possible.")
@@ -316,5 +307,3 @@ if st.session_state["baggage_list"]:
                 cargo_dims = (container["interior"]["depth_max"], container["interior"]["width_max"], container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
-
-
