@@ -40,7 +40,7 @@ standard_baggage = {
 def fits_through_door(box_dims, door):
     l, w, h = box_dims
     for dims in itertools.permutations([l, w, h]):
-        bw, bh = dims[0], dims[1]  # orientation
+        bw, bh = dims[0], dims[1]
         diag = (bw**2 + bh**2) ** 0.5
         if "width_min" in door:  # CJ
             if (bw <= door["width_max"] and bh <= door["height"]) or diag <= door["diag"]:
@@ -303,11 +303,17 @@ if st.session_state["baggage_list"]:
         st.write("### Overall Cargo Volume Check")
         st.write(f"Total Baggage Volume: {total_baggage:,} in³")
         st.write(f"Cargo Capacity: {cargo_cap:,} in³")
-        st.success("✅ Within volume capacity.") if feasible else st.error("❌ Exceeds volume capacity.")
+        if feasible:
+            st.success("✅ Within volume capacity.")
+        else:
+            st.error("❌ Exceeds volume capacity.")
 
         success, placements = greedy_3d_packing(st.session_state["baggage_list"], container_choice, container["interior"])
         st.write("### Overall Cargo Packing Feasibility")
-        st.success("✅ Packing possible.") if success else st.error("❌ Packing failed.")
+        if success:
+            st.success("✅ Packing possible.")
+        else:
+            st.error("❌ Packing failed.")
 
         if placements:
             st.write("### Suggested Placement Positions")
