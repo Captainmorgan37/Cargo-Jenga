@@ -29,10 +29,10 @@ containers = {
 # ----------------- Standard Baggage Presets -----------------
 standard_baggage = {
     "Small Carry-on": (22, 14, 9),
-    "Medium Suitcase": (24, 16, 10),
-    "Large Suitcase": (28, 20, 12),
-    "Golf Clubs": (50, 15, 12),
-    "Ski Bag": (72, 10, 7),
+    "Standard Suitcase": (26, 18, 10),
+    "Large Suitcase": (30, 19, 11),
+    "Golf Clubs": (50, 14, 14),
+    "Ski Bag": (70, 12, 7),
     "Custom": None
 }
 
@@ -326,3 +326,4 @@ if st.session_state["baggage_list"]:
                 cargo_dims = (container["interior"]["depth_max"], container["interior"]["width_max"], container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
+
