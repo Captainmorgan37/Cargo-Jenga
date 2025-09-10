@@ -107,28 +107,49 @@ def greedy_3d_packing(baggage_list, container_type, interior):
 
     for i, item in enumerate(baggage_list):
         box = item["Dims"]
-        oriented = fits_in_space(box, (cargo_L - x_cursor, cargo_W - y_cursor, cargo_H - z_cursor))
-        if not oriented:
-            # Next row Y
-            x_cursor = 0
-            y_cursor += max_y_in_row
-            max_y_in_row = 0
-            oriented = fits_in_space(box, (cargo_L - x_cursor, cargo_W - y_cursor, cargo_H - z_cursor))
-            if not oriented:
-                # Next layer Z
-                x_cursor = y_cursor = 0
-                z_cursor += row_height
-                row_height = 0
-                oriented = fits_in_space(box, (cargo_L - x_cursor, cargo_W - y_cursor, cargo_H - z_cursor))
-                if not oriented:
-                    return False, placements
+        placed = False
 
-        l, w, h = oriented
-        placements.append({"Item": i+1, "Type": item["Type"], "Dims": (l, w, h),
-                           "Position": (x_cursor, y_cursor, z_cursor)})
-        x_cursor += l
-        row_height = max(row_height, h)
-        max_y_in_row = max(max_y_in_row, w)
+        # Try placements in the cargo space
+        for attempt in range(3):  # try current row, next row, next layer
+            oriented = fits_in_space(box, (cargo_L - x_cursor, cargo_W - y_cursor, cargo_H - z_cursor))
+            if oriented:
+                l, w, h = oriented
+                x0, y0, z0 = x_cursor, y_cursor, z_cursor
+                x1, y1, z1 = x0 + l, y0 + w, z0 + h
+
+                # Check overlap with restricted zone for CJ
+                if container_type == "CJ":
+                    r = interior["restricted"]
+                    rx0, rx1 = 0, r["depth"]
+                    ry0, ry1 = cargo_W - r["width"], cargo_W
+                    rz0, rz1 = 0, interior["height"]
+
+                    overlap = not (x1 <= rx0 or x0 >= rx1 or y1 <= ry0 or y0 >= ry1 or z1 <= rz0 or z0 >= rz1)
+                    if overlap:
+                        # Skip this spot, try to move cursor
+                        oriented = None
+                    else:
+                        placements.append({"Item": i+1, "Type": item["Type"], "Dims": (l, w, h),
+                                           "Position": (x0, y0, z0)})
+                        x_cursor += l
+                        row_height = max(row_height, h)
+                        max_y_in_row = max(max_y_in_row, w)
+                        placed = True
+                        break
+
+            # If not placed, move cursor
+            if not placed:
+                if attempt == 0:  # try new row along Y
+                    x_cursor = 0
+                    y_cursor += max_y_in_row
+                    max_y_in_row = 0
+                elif attempt == 1:  # try new layer along Z
+                    x_cursor = y_cursor = 0
+                    z_cursor += row_height
+                    row_height = 0
+
+        if not placed:
+            return False, placements
 
     return True, placements
 
@@ -147,14 +168,12 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
         name='Cargo Hold'
     ))
 
+    # CJ restricted area
     if container_type == "CJ" and interior is not None:
         r = interior["restricted"]
-    
-        # Restricted block is at the FRONT-LEFT corner (from door view)
         x0, y0, z0 = 0, cargo_W - r["width"], 0
         x1, y1, z1 = r["depth"], cargo_W, interior["height"]
-    
-        # 8 vertices of the block
+
         vertices = [
             [x0, y0, z0],
             [x1, y0, z0],
@@ -165,10 +184,8 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
             [x1, y1, z1],
             [x0, y1, z1]
         ]
-    
         x, y, z = zip(*vertices)
-    
-        # Define faces explicitly (each face is a quad, split into 2 triangles)
+
         faces = [
             (0,1,2), (0,2,3),   # bottom
             (4,5,6), (4,6,7),   # top
@@ -178,7 +195,7 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
             (0,3,7), (0,7,4)    # left
         ]
         i, j, k = zip(*faces)
-    
+
         fig.add_trace(go.Mesh3d(
             x=x, y=y, z=z,
             i=i, j=j, k=k,
@@ -186,7 +203,6 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
             opacity=0.4,
             name='Restricted Area'
         ))
-
 
     # Add baggage
     colors = ['red', 'green', 'blue', 'orange', 'purple', 'cyan', 'magenta']
@@ -306,6 +322,3 @@ if st.session_state["baggage_list"]:
                 cargo_dims = (container["interior"]["depth_max"], container["interior"]["width_max"], container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
-
-
-
