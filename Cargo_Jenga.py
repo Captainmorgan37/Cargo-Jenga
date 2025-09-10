@@ -194,8 +194,14 @@ st.title("Aircraft Cargo Fit Checker")
 container_choice = st.selectbox("Select Aircraft Cargo Hold", list(containers.keys()))
 container = containers[container_choice]
 
+# Initialize baggage list
 if "baggage_list" not in st.session_state:
     st.session_state["baggage_list"] = []
+
+# Clear baggage list button
+if st.button("Clear Baggage List"):
+    st.session_state["baggage_list"] = []
+    st.success("✅ Baggage list cleared.")
 
 st.write("### Add Baggage")
 baggage_type = st.selectbox("Baggage Type", list(standard_baggage.keys()))
