@@ -147,18 +147,23 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
         name='Cargo Hold'
     ))
 
-    # CJ restricted area
     if container_type == "CJ" and interior is not None:
         r = interior["restricted"]
+        # Define corners of the restricted block
         x = [0, r["depth"], r["depth"], 0, 0, r["depth"], r["depth"], 0]
         y = [0, 0, r["width"], r["width"], 0, 0, r["width"], r["width"]]
-        z = [0,0,0,0, interior["height"], interior["height"], interior["height"], interior["height"]]
+        z = [0, 0, 0, 0, interior["height"], interior["height"], interior["height"], interior["height"]]
+        
         fig.add_trace(go.Mesh3d(
             x=x, y=y, z=z,
+            i=[0,0,0,1,1,2,2,3,4,4,4,5],
+            j=[1,2,3,2,5,3,6,0,5,6,7,6],
+            k=[2,3,0,5,6,6,7,7,6,7,4,7],
             color='gray',
             opacity=0.4,
             name='Restricted Area'
         ))
+
 
         # Door outline at the front wall
         fig.add_trace(go.Scatter3d(
@@ -288,3 +293,4 @@ if st.session_state["baggage_list"]:
                 cargo_dims = (container["interior"]["depth_max"], container["interior"]["width_max"], container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
+
