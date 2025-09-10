@@ -297,16 +297,6 @@ if st.session_state["baggage_list"]:
         st.write("### Fit Results")
         st.table(pd.DataFrame(results))
 
-        total_baggage, cargo_cap, feasible = check_total_fit(
-            st.session_state["baggage_list"], container, container_choice
-        )
-        st.write("### Overall Cargo Volume Check")
-        st.write(f"Total Baggage Volume: {total_baggage:,} in³")
-        st.write(f"Cargo Capacity: {cargo_cap:,} in³")
-        if feasible:
-            st.success("✅ Within volume capacity.")
-        else:
-            st.error("❌ Exceeds volume capacity.")
 
         success, placements = greedy_3d_packing(st.session_state["baggage_list"], container_choice, container["interior"])
         st.write("### Overall Cargo Packing Feasibility")
@@ -326,4 +316,5 @@ if st.session_state["baggage_list"]:
                 cargo_dims = (container["interior"]["depth_max"], container["interior"]["width_max"], container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
+
 
