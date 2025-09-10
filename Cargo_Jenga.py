@@ -1,16 +1,28 @@
 import streamlit as st
 import pandas as pd
 import itertools
+import plotly.graph_objects as go
 
 # ----------------- Predefined Containers -----------------
 containers = {
     "CJ": {
         "door": {"width_min": 24, "width_max": 26, "height": 20, "diag": 31},
-        "interior": {"height": 22, "depth": 45, "width": 84, "restricted": {"width": 20, "depth": 20}}
+        "interior": {
+            "height": 22, 
+            "depth": 45, 
+            "width": 84, 
+            "restricted": {"width": 20, "depth": 20}
+        }
     },
     "Legacy": {
         "door": {"width": 34, "height": 22, "diag": 38},
-        "interior": {"height": 36, "depth_min": 36, "depth_max": 54, "width_min": 36, "width_max": 89}
+        "interior": {
+            "height": 36, 
+            "depth_min": 36, 
+            "depth_max": 54, 
+            "width_min": 36, 
+            "width_max": 89
+        }
     }
 }
 
@@ -49,6 +61,132 @@ def fits_inside(box_dims, interior, container_type):
             if bh <= interior["height"] and bl <= interior["depth_max"] and bw <= interior["width_max"]:
                 return True
     return False
+
+def cargo_volume(container_type, interior):
+    if container_type == "CJ":
+        total = interior["height"] * interior["depth"] * interior["width"]
+        restricted = interior["height"] * interior["restricted"]["depth"] * interior["restricted"]["width"]
+        return total - restricted
+    elif container_type == "Legacy":
+        front = interior["height"] * interior["depth_min"] * interior["width_max"]
+        back = interior["height"] * (interior["depth_max"] - interior["depth_min"]) * interior["width_min"]
+        return front + back
+
+def box_volume(dims):
+    l, w, h = dims
+    return l * w * h
+
+def check_total_fit(baggage_list, container, container_type):
+    total_baggage = sum(box_volume(item["Dims"]) for item in baggage_list)
+    cargo_cap = cargo_volume(container_type, container["interior"])
+    return total_baggage, cargo_cap, total_baggage <= cargo_cap
+
+# ----------------- Greedy 3D Packing -----------------
+def fits_in_space(box_dims, space_dims):
+    l, w, h = box_dims
+    for dims in itertools.permutations([l, w, h]):
+        bl, bw, bh = dims
+        if bl <= space_dims[0] and bw <= space_dims[1] and bh <= space_dims[2]:
+            return dims
+    return None
+
+def greedy_3d_packing(baggage_list, container_type, interior):
+    if container_type == "CJ":
+        cargo_L = interior["depth"]
+        cargo_W = interior["width"]
+        cargo_H = interior["height"]
+    else:  # Legacy
+        cargo_L = interior["depth_max"]
+        cargo_W = interior["width_max"]
+        cargo_H = interior["height"]
+    
+    placements = []
+    x_cursor = y_cursor = z_cursor = 0
+    row_height = 0
+    max_y_in_row = 0
+
+    for i, item in enumerate(baggage_list):
+        box = item["Dims"]
+        oriented = fits_in_space(box, (cargo_L - x_cursor, cargo_W - y_cursor, cargo_H - z_cursor))
+        if not oriented:
+            # Next row Y
+            x_cursor = 0
+            y_cursor += max_y_in_row
+            max_y_in_row = 0
+            oriented = fits_in_space(box, (cargo_L - x_cursor, cargo_W - y_cursor, cargo_H - z_cursor))
+            if not oriented:
+                # Next layer Z
+                x_cursor = y_cursor = 0
+                z_cursor += row_height
+                row_height = 0
+                oriented = fits_in_space(box, (cargo_L - x_cursor, cargo_W - y_cursor, cargo_H - z_cursor))
+                if not oriented:
+                    return False, placements
+
+        l, w, h = oriented
+        placements.append({"Item": i+1, "Type": item["Type"], "Dims": (l, w, h),
+                           "Position": (x_cursor, y_cursor, z_cursor)})
+        x_cursor += l
+        row_height = max(row_height, h)
+        max_y_in_row = max(max_y_in_row, w)
+
+    return True, placements
+
+# ----------------- Visualization -----------------
+def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
+    cargo_L, cargo_W, cargo_H = cargo_dims
+    fig = go.Figure()
+
+    # Cargo hold edges
+    fig.add_trace(go.Scatter3d(
+        x=[0, cargo_L, cargo_L, 0, 0, 0, cargo_L, cargo_L],
+        y=[0, 0, cargo_W, cargo_W, 0, 0, cargo_W, cargo_W],
+        z=[0, 0, 0, 0, cargo_H, cargo_H, cargo_H, cargo_H],
+        mode='lines',
+        line=dict(color='black', width=4),
+        name='Cargo Hold'
+    ))
+
+    # CJ restricted area
+    if container_type == "CJ" and interior is not None:
+        r = interior["restricted"]
+        x0, y0, z0 = 0, 0, 0
+        x = [x0, r["depth"], r["depth"], 0, 0, r["depth"], r["depth"], 0]
+        y = [y0, y0, r["width"], r["width"], y0, y0, r["width"], r["width"]]
+        z = [0,0,0,0, interior["height"], interior["height"], interior["height"], interior["height"]]
+        fig.add_trace(go.Mesh3d(
+            x=x, y=y, z=z,
+            color='gray',
+            opacity=0.3,
+            name='Restricted Area'
+        ))
+
+    # Add baggage
+    colors = ['red', 'green', 'blue', 'orange', 'purple', 'cyan', 'magenta']
+    for idx, item in enumerate(placements):
+        l, w, h = item["Dims"]
+        x0, y0, z0 = item["Position"]
+        color = colors[idx % len(colors)]
+        x = [x0, x0+l, x0+l, x0, x0, x0+l, x0+l, x0]
+        y = [y0, y0, y0+w, y0+w, y0, y0, y0+w, y0+w]
+        z = [z0, z0, z0, z0, z0+h, z0+h, z0+h, z0+h]
+        fig.add_trace(go.Mesh3d(
+            x=x, y=y, z=z,
+            color=color,
+            opacity=0.5,
+            name=item["Type"]
+        ))
+
+    fig.update_layout(
+        scene=dict(
+            xaxis_title='Depth (in)',
+            yaxis_title='Width (in)',
+            zaxis_title='Height (in)',
+            aspectmode='data'
+        ),
+        margin=dict(l=0, r=0, b=0, t=0)
+    )
+    return fig
 
 # ----------------- Streamlit UI -----------------
 st.title("Aircraft Cargo Fit Checker")
@@ -102,3 +240,36 @@ if st.session_state["baggage_list"]:
 
         st.write("### Fit Results")
         st.table(pd.DataFrame(results))
+
+        # Overall volume check
+        total_baggage, cargo_cap, feasible = check_total_fit(
+            st.session_state["baggage_list"], container, container_choice
+        )
+        st.write("### Overall Cargo Volume Check")
+        st.write(f"Total Baggage Volume: {total_baggage:,} in³")
+        st.write(f"Cargo Capacity: {cargo_cap:,} in³")
+        if feasible:
+            st.success("✅ Total baggage volume can fit inside the cargo hold.")
+        else:
+            st.error("❌ Total baggage volume exceeds cargo hold capacity.")
+
+        # Greedy 3D placement
+        success, placements = greedy_3d_packing(st.session_state["baggage_list"], container_choice, container["interior"])
+        st.write("### Overall Cargo Packing Feasibility")
+        if success:
+            st.success("✅ All baggage items can be placed in the cargo hold.")
+        else:
+            st.error("❌ Some items cannot fit together in the cargo hold.")
+
+        if placements:
+            st.write("### Suggested Placement Positions")
+            df_place = pd.DataFrame(placements)
+            st.table(df_place)
+
+            st.write("### Cargo Load Visualization")
+            if container_choice == "CJ":
+                cargo_dims = (container["interior"]["depth"], container["interior"]["width"], container["interior"]["height"])
+            else:
+                cargo_dims = (container["interior"]["depth_max"], container["interior"]["width_max"], container["interior"]["height"])
+            fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
+            st.plotly_chart(fig, use_container_width=True)
