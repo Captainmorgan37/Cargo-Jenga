@@ -8,19 +8,19 @@ containers = {
     "CJ": {
         "door": {"width_min": 24, "width_max": 26, "height": 20, "diag": 31},
         "interior": {
-            "height": 22, 
-            "depth": 45, 
-            "width": 84, 
+            "height": 22,
+            "depth": 45,
+            "width": 84,
             "restricted": {"width": 20, "depth": 20}
         }
     },
     "Legacy": {
         "door": {"width": 34, "height": 22, "diag": 38},
         "interior": {
-            "height": 36, 
-            "depth_min": 36, 
-            "depth_max": 54, 
-            "width_min": 36, 
+            "height": 36,
+            "depth_min": 36,
+            "depth_max": 54,
+            "width_min": 36,
             "width_max": 89
         }
     }
@@ -99,7 +99,7 @@ def greedy_3d_packing(baggage_list, container_type, interior):
         cargo_L = interior["depth_max"]
         cargo_W = interior["width_max"]
         cargo_H = interior["height"]
-    
+
     placements = []
     x_cursor = y_cursor = z_cursor = 0
     row_height = 0
@@ -150,15 +150,24 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
     # CJ restricted area
     if container_type == "CJ" and interior is not None:
         r = interior["restricted"]
-        x0, y0, z0 = 0, 0, 0
-        x = [x0, r["depth"], r["depth"], 0, 0, r["depth"], r["depth"], 0]
-        y = [y0, y0, r["width"], r["width"], y0, y0, r["width"], r["width"]]
+        x = [0, r["depth"], r["depth"], 0, 0, r["depth"], r["depth"], 0]
+        y = [0, 0, r["width"], r["width"], 0, 0, r["width"], r["width"]]
         z = [0,0,0,0, interior["height"], interior["height"], interior["height"], interior["height"]]
         fig.add_trace(go.Mesh3d(
             x=x, y=y, z=z,
             color='gray',
-            opacity=0.3,
+            opacity=0.4,
             name='Restricted Area'
+        ))
+
+        # Door outline at the front wall
+        fig.add_trace(go.Scatter3d(
+            x=[0, 0, 0, 0, 0],
+            y=[0, 24, 26, 0, 24],
+            z=[0, 0, 20, 20, 0],
+            mode="lines",
+            line=dict(color="red", width=6),
+            name="Door Opening"
         ))
 
     # Add baggage
