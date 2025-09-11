@@ -49,6 +49,12 @@ def fits_through_door(box_dims, door):
                 return True
     return False
 
+def legacy_width_at_height(interior, z):
+    """Linearly interpolate width between bottom and top based on height z."""
+    h = interior["height"]
+    wmin, wmax = interior["width_min"], interior["width_max"]
+    return wmin + (wmax - wmin) * (z / h)
+
 def fits_inside(box_dims, interior, container_type):
     l, w, h = box_dims
     for dims in itertools.permutations([l, w, h]):
@@ -57,8 +63,13 @@ def fits_inside(box_dims, interior, container_type):
             if bh <= interior["height"] and bl <= interior["depth"] and bw <= interior["width"]:
                 return True
         elif container_type == "Legacy":
-            if bh <= interior["height"] and bl <= interior["depth"] and bw <= interior["width_max"]:
-                return True
+            if bl <= interior["depth"] and bh <= interior["height"]:
+                # check against taper at bottom and top of box
+                if bw <= min(
+                    legacy_width_at_height(interior, 0),
+                    legacy_width_at_height(interior, bh)
+                ):
+                    return True
     return False
 
 def box_volume(dims):
@@ -81,7 +92,7 @@ def greedy_3d_packing(baggage_list, container_type, interior):
         cargo_H = interior["height"]
     else:  # Legacy
         cargo_L = interior["depth"]
-        cargo_W = interior["width_max"]
+        cargo_W = interior["width_max"]  # upper bound
         cargo_H = interior["height"]
 
     placements = []
@@ -100,8 +111,8 @@ def greedy_3d_packing(baggage_list, container_type, interior):
                 x0, y0, z0 = x_cursor, y_cursor, z_cursor
                 x1, y1, z1 = x0 + l, y0 + w, z0 + h
 
-                # CJ restricted block check
                 if container_type == "CJ":
+                    # restricted block check
                     r = interior["restricted"]
                     rx0, rx1 = 0, r["depth"]
                     ry0, ry1 = cargo_W - r["width"], cargo_W
@@ -118,14 +129,19 @@ def greedy_3d_packing(baggage_list, container_type, interior):
                         max_y_in_row = max(max_y_in_row, w)
                         placed = True
                         break
-                else:
-                    placements.append({"Item": i+1, "Type": item["Type"], "Dims": (l, w, h),
-                                       "Position": (x0, y0, z0)})
-                    x_cursor += l
-                    row_height = max(row_height, h)
-                    max_y_in_row = max(max_y_in_row, w)
-                    placed = True
-                    break
+                else:  # Legacy taper check
+                    w_bottom = legacy_width_at_height(interior, z0)
+                    w_top = legacy_width_at_height(interior, z1)
+                    if w <= min(w_bottom, w_top):
+                        placements.append({"Item": i+1, "Type": item["Type"], "Dims": (l, w, h),
+                                           "Position": (x0, y0, z0)})
+                        x_cursor += l
+                        row_height = max(row_height, h)
+                        max_y_in_row = max(max_y_in_row, w)
+                        placed = True
+                        break
+                    else:
+                        oriented = None
 
             if not placed:
                 if attempt == 0:
@@ -153,11 +169,7 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
             (0,0,0), (cargo_L,0,0), (cargo_L,cargo_W,0), (0,cargo_W,0),
             (0,0,cargo_H), (cargo_L,0,cargo_H), (cargo_L,cargo_W,cargo_H), (0,cargo_W,cargo_H)
         ]
-        edges = [
-            (0,1),(1,2),(2,3),(3,0),
-            (4,5),(5,6),(6,7),(7,4),
-            (0,4),(1,5),(2,6),(3,7)
-        ]
+        edges = [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)]
         for e in edges:
             x = [corners[e[0]][0], corners[e[1]][0]]
             y = [corners[e[0]][1], corners[e[1]][1]]
@@ -176,18 +188,14 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
             [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]
         ]
         x, y, z = zip(*vertices)
-        faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
-                 (0,1,5),(0,5,4),(1,2,6),(1,6,5),
-                 (2,3,7),(2,7,6),(3,0,4),(3,4,7)]
+        faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),(0,1,5),(0,5,4),
+                 (1,2,6),(1,6,5),(2,3,7),(2,7,6),(3,0,4),(3,4,7)]
         i, j, k = zip(*faces)
-        fig.add_trace(go.Mesh3d(
-            x=x, y=y, z=z,
-            i=i, j=j, k=k,
-            color='gray', opacity=0.4,
-            name='Restricted Area'
-        ))
+        fig.add_trace(go.Mesh3d(x=x,y=y,z=z,i=i,j=j,k=k,
+                                color='gray', opacity=0.4,
+                                name='Restricted Area'))
 
-    # Cargo hold for Legacy (rectangular prism with tapered width)
+    # Cargo hold for Legacy (rectangular prism with taper)
     if container_type == "Legacy":
         d = interior["depth"]
         wmin, wmax = interior["width_min"], interior["width_max"]
@@ -202,12 +210,9 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
                  (0,1,5),(0,5,4),(1,2,6),(1,6,5),
                  (2,3,7),(2,7,6),(3,0,4),(3,4,7)]
         i, j, k = zip(*faces)
-        fig.add_trace(go.Mesh3d(
-            x=x, y=y, z=z,
-            i=i, j=j, k=k,
-            color='lightblue', opacity=0.15,
-            name='Legacy Cargo Hold'
-        ))
+        fig.add_trace(go.Mesh3d(x=x,y=y,z=z,i=i,j=j,k=k,
+                                color='lightblue', opacity=0.15,
+                                name='Legacy Cargo Hold'))
 
     # Add baggage
     colors = ['red','green','blue','orange','purple','cyan','magenta']
@@ -218,11 +223,7 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
         x = [x0, x0+l, x0+l, x0, x0, x0+l, x0+l, x0]
         y = [y0, y0, y0+w, y0+w, y0, y0, y0+w, y0+w]
         z = [z0, z0, z0, z0, z0+h, z0+h, z0+h, z0+h]
-        fig.add_trace(go.Mesh3d(
-            x=x, y=y, z=z,
-            color=color, opacity=0.5,
-            name=item["Type"]
-        ))
+        fig.add_trace(go.Mesh3d(x=x,y=y,z=z,color=color,opacity=0.5,name=item["Type"]))
 
     fig.update_layout(
         scene=dict(
