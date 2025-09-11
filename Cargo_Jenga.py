@@ -9,10 +9,12 @@ containers = {
         "door": {"width_min": 24, "width_max": 26, "height": 20, "diag": 31},
         "interior": {
             "height": 22,
-            "depth": 45,   # main box depth
-            "width": 84,   # main box width
-            "restricted": {"width": 20, "depth": 20},  # restricted block
-            "tunnel": {"length": 84, "width": 24}      # long tunnel section
+            "depth": 45,   # main box depth (x)
+            "width": 84,   # main box width (y)
+            "restricted": {"width": 20, "depth": 20},  # near the door, right side
+            # Long tunnel section: sits against the BACK WALL (x near depth),
+            # and runs along the LEFT side (low y). Dimensions are (depth x width).
+            "tunnel": {"depth": 24, "width": 84}
         }
     },
     "Legacy": {
@@ -87,41 +89,70 @@ def fits_inside(box_dims, interior, container_type, flex=1.0):
 # ----------------- Greedy 3D Packing -----------------
 def greedy_3d_packing(baggage_list, container_type, interior):
     placements = []
+
     if container_type == "CJ":
-        cargo_L = interior["depth"]
-        cargo_W = interior["width"]
-        cargo_H = interior["height"]
+        cargo_L = interior["depth"]    # x
+        cargo_W = interior["width"]    # y
+        cargo_H = interior["height"]   # z
+
+        # Tunnel geometry (against back wall, along left side)
+        t_depth = interior["tunnel"]["depth"]  # along x
+        t_width = interior["tunnel"]["width"]  # along y
+        t_x0 = cargo_L - t_depth               # start near back wall
+        t_y0 = 0                               # left edge
+        t_z0 = 0
+
+        # Tunnel cursors (lay out along y, then z)
+        t_y_cursor = 0.0
+        t_z_cursor = 0.0
+        t_row_height = 0.0
 
     else:  # Legacy
         cargo_L = interior["depth"]
-        cargo_W = interior["width_min"]
+        cargo_W = interior["width_min"]  # use narrowest width baseline
         cargo_H = interior["height"]
 
-    x_cursor = y_cursor = z_cursor = 0
-    row_height = 0
-    max_y_in_row = 0
+    # Main box cursors
+    x_cursor = y_cursor = z_cursor = 0.0
+    row_height = 0.0
+    max_y_in_row = 0.0
 
     for i, item in enumerate(baggage_list):
         dims_flex = apply_flex(item["Dims"], item.get("Flex", 1.0))
         placed = False
 
-        # --- Special handling for CJ tunnel (long section) ---
+        # --- Prefer CJ tunnel for long items (e.g., golf/ski) ---
         if container_type == "CJ":
-            tunnel = interior["tunnel"]
-            tunnel_dims = (tunnel["length"], tunnel["width"], interior["height"])
-            oriented = fits_in_space(dims_flex, tunnel_dims)
-            if oriented and max(dims_flex) > interior["depth"]:
-                l, w, h = oriented
-                # Place at back wall, extending left
-                placements.append({"Item": i+1, "Type": item["Type"],
-                                   "Dims": item["Dims"],
-                                   "Position": (0, 0, 0)})
-                placed = True
-                continue
+            longish = max(dims_flex) >= 50  # heuristic: >=50" treated as long
+            if longish:
+                # Remaining tunnel space for this row/layer
+                tunnel_space = (t_depth, max(0.0, t_width - t_y_cursor), max(0.0, cargo_H - t_z_cursor))
+                oriented = fits_in_space(dims_flex, tunnel_space)
+                if oriented:
+                    l, w, h = oriented
+                    # Place at tunnel origin + cursors
+                    x0 = t_x0
+                    y0 = t_y0 + t_y_cursor
+                    z0 = t_z0 + t_z_cursor
+                    placements.append({
+                        "Item": i + 1, "Type": item["Type"], "Dims": item["Dims"],
+                        "Position": (x0, y0, z0)
+                    })
+                    # Advance tunnel cursors
+                    t_y_cursor += w
+                    t_row_height = max(t_row_height, h)
+                    if t_y_cursor > t_width + 1e-6:  # new layer if row full
+                        t_y_cursor = 0.0
+                        t_z_cursor += t_row_height
+                        t_row_height = 0.0
+                    placed = True
 
-        # --- Normal greedy placement ---
+        if placed:
+            continue
+
+        # --- Normal greedy placement in main box ---
         for attempt in range(3):  # try row, new row, new layer
-            oriented = fits_in_space(dims_flex, (cargo_L - x_cursor, cargo_W, cargo_H - z_cursor))
+            oriented = fits_in_space(dims_flex, (max(0.0, cargo_L - x_cursor), cargo_W, max(0.0, cargo_H - z_cursor)))
             if oriented:
                 l, w, h = oriented
                 x0, y0, z0 = x_cursor, y_cursor, z_cursor
@@ -129,33 +160,32 @@ def greedy_3d_packing(baggage_list, container_type, interior):
 
                 if container_type == "CJ":
                     r = interior["restricted"]
-                    rx0, rx1 = 0, r["depth"]
+                    rx0, rx1 = 0.0, r["depth"]
                     ry0, ry1 = cargo_W - r["width"], cargo_W
-                    rz0, rz1 = 0, interior["height"]
+                    rz0, rz1 = 0.0, cargo_H
 
-                    overlap = not (x1 <= rx0 or x0 >= rx1 or
-                                   y1 <= ry0 or y0 >= ry1 or
-                                   z1 <= rz0 or z0 >= rz1)
+                    overlap = not (x1 <= rx0 or x0 >= rx1 or y1 <= ry0 or y0 >= ry1 or z1 <= rz0 or z0 >= rz1)
                     if overlap:
                         oriented = None
                     else:
-                        placements.append({"Item": i+1, "Type": item["Type"],
-                                           "Dims": item["Dims"],
-                                           "Position": (x0, y0, z0)})
+                        placements.append({
+                            "Item": i + 1, "Type": item["Type"], "Dims": item["Dims"],
+                            "Position": (x0, y0, z0)
+                        })
                         x_cursor += l
                         row_height = max(row_height, h)
                         max_y_in_row = max(max_y_in_row, w)
                         placed = True
                         break
-                else:  # Legacy taper
-                    w_avail_bottom = legacy_width_at_height(interior, z0)
-                    w_avail_top = legacy_width_at_height(interior, z1)
-                    w_avail = min(w_avail_bottom, w_avail_top)
-
+                else:  # Legacy taper check
+                    from_bottom = legacy_width_at_height(interior, z0)
+                    to_top = legacy_width_at_height(interior, z1)
+                    w_avail = min(from_bottom, to_top)
                     if y1 <= w_avail:
-                        placements.append({"Item": i+1, "Type": item["Type"],
-                                           "Dims": item["Dims"],
-                                           "Position": (x0, y0, z0)})
+                        placements.append({
+                            "Item": i + 1, "Type": item["Type"], "Dims": item["Dims"],
+                            "Position": (x0, y0, z0)
+                        })
                         x_cursor += l
                         row_height = max(row_height, h)
                         max_y_in_row = max(max_y_in_row, w)
@@ -166,13 +196,13 @@ def greedy_3d_packing(baggage_list, container_type, interior):
 
             if not placed:
                 if attempt == 0:
-                    x_cursor = 0
+                    x_cursor = 0.0
                     y_cursor += max_y_in_row
-                    max_y_in_row = 0
+                    max_y_in_row = 0.0
                 elif attempt == 1:
-                    x_cursor = y_cursor = 0
+                    x_cursor = y_cursor = 0.0
                     z_cursor += row_height
-                    row_height = 0
+                    row_height = 0.0
 
         if not placed:
             return False, placements
@@ -206,8 +236,9 @@ def multi_strategy_packing(baggage_list, container_type, interior):
 
 def cargo_volume(interior, container_type):
     if container_type == "CJ":
-        return (interior["depth"] * interior["width"] * interior["height"] +
-                interior["tunnel"]["length"] * interior["tunnel"]["width"] * interior["height"])
+        main_vol = interior["depth"] * interior["width"] * interior["height"]
+        tunnel_vol = interior["tunnel"]["depth"] * interior["tunnel"]["width"] * interior["height"]
+        return main_vol + tunnel_vol
     else:  # Legacy
         return interior["depth"] * ((interior["width_min"] + interior["width_max"]) / 2) * interior["height"]
 
@@ -217,48 +248,56 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
     fig = go.Figure()
 
     if container_type == "CJ":
-        # Main box
+        # Main hold wireframe (no legend spam)
         corners = [
             (0,0,0), (cargo_L,0,0), (cargo_L,cargo_W,0), (0,cargo_W,0),
             (0,0,cargo_H), (cargo_L,0,cargo_H), (cargo_L,cargo_W,cargo_H), (0,cargo_W,cargo_H)
         ]
         edges = [(0,1),(1,2),(2,3),(3,0),(4,5),(5,6),(6,7),(7,4),(0,4),(1,5),(2,6),(3,7)]
-        for e in edges:
+        for idx,e in enumerate(edges):
             x = [corners[e[0]][0], corners[e[1]][0]]
             y = [corners[e[0]][1], corners[e[1]][1]]
             z = [corners[e[0]][2], corners[e[1]][2]]
-            fig.add_trace(go.Scatter3d(x=x,y=y,z=z,mode='lines',
-                                       line=dict(color='black',width=4),
-                                       name='Main Hold'))
+            fig.add_trace(go.Scatter3d(
+                x=x,y=y,z=z,mode='lines',
+                line=dict(color='black',width=3),
+                showlegend=False  # prevent repeated "Main Hold" entries
+            ))
 
-        # Restricted block
+        # Restricted block (near door, right side)
         r = interior["restricted"]
         x0, y0, z0 = 0, cargo_W - r["width"], 0
-        x1, y1, z1 = r["depth"], cargo_W, interior["height"]
-
+        x1, y1, z1 = r["depth"], cargo_W, cargo_H
         vertices = [
             [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
             [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]
         ]
         x, y, z = zip(*vertices)
-        faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),(0,1,5),(0,5,4),
-                 (1,2,6),(1,6,5),(2,3,7),(2,7,6),(3,0,4),(3,4,7)]
+        faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
+                 (0,1,5),(0,5,4),(1,2,6),(1,6,5),
+                 (2,3,7),(2,7,6),(3,0,4),(3,4,7)]
         i, j, k = zip(*faces)
         fig.add_trace(go.Mesh3d(x=x,y=y,z=z,i=i,j=j,k=k,
-                                color='gray', opacity=0.4,
+                                color='gray', opacity=0.35,
                                 name='Restricted Area'))
 
-        # Tunnel section
-        tunnel = interior["tunnel"]
-        tL, tW, tH = tunnel["length"], tunnel["width"], interior["height"]
+        # Long tunnel (against back wall, left side)
+        t_depth = interior["tunnel"]["depth"]
+        t_width = interior["tunnel"]["width"]
+        t_x0 = cargo_L - t_depth
+        t_y0 = 0
+        tL = t_depth
+        tW = t_width
+        tH = cargo_H
         vertices = [
-            [0,0,0],[tL,0,0],[tL,tW,0],[0,tW,0],
-            [0,0,tH],[tL,0,tH],[tL,tW,tH],[0,tW,tH]
+            [t_x0, t_y0, 0],            [t_x0 + tL, t_y0, 0],       [t_x0 + tL, t_y0 + tW, 0],       [t_x0, t_y0 + tW, 0],
+            [t_x0, t_y0, tH],           [t_x0 + tL, t_y0, tH],      [t_x0 + tL, t_y0 + tW, tH],      [t_x0, t_y0 + tW, tH]
         ]
         x,y,z = zip(*vertices)
-        i,j,k = zip(*[(0,1,2),(0,2,3),(4,5,6),(4,6,7),
-                      (0,1,5),(0,5,4),(1,2,6),(1,6,5),
-                      (2,3,7),(2,7,6),(3,0,4),(3,4,7)])
+        faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
+                 (0,1,5),(0,5,4),(1,2,6),(1,6,5),
+                 (2,3,7),(2,7,6),(3,0,4),(3,4,7)]
+        i,j,k = zip(*faces)
         fig.add_trace(go.Mesh3d(x=x,y=y,z=z,i=i,j=j,k=k,
                                 color='lightblue', opacity=0.2,
                                 name='Long Tunnel'))
@@ -267,15 +306,15 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
         d = interior["depth"]
         wmin, wmax = interior["width_min"], interior["width_max"]
         h = interior["height"]
-
         vertices = [
             [0,0,0],[d,0,0],[d,wmin,0],[0,wmin,0],
             [0,0,h],[d,0,h],[d,wmax,h],[0,wmax,h]
         ]
         x,y,z = zip(*vertices)
-        i,j,k = zip(*[(0,1,2),(0,2,3),(4,5,6),(4,6,7),
-                      (0,1,5),(0,5,4),(1,2,6),(1,6,5),
-                      (2,3,7),(2,7,6),(3,0,4),(3,4,7)])
+        faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
+                 (0,1,5),(0,5,4),(1,2,6),(1,6,5),
+                 (2,3,7),(2,7,6),(3,0,4),(3,4,7)]
+        i,j,k = zip(*faces)
         fig.add_trace(go.Mesh3d(x=x,y=y,z=z,i=i,j=j,k=k,
                                 color='lightblue', opacity=0.15,
                                 name='Legacy Hold'))
@@ -291,10 +330,13 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
         z=[z0,z0,z0,z0,z0+h,z0+h,z0+h,z0+h]
         fig.add_trace(go.Mesh3d(x=x,y=y,z=z,color=color,opacity=0.5,name=item["Type"]))
 
-    fig.update_layout(scene=dict(
-        xaxis_title='Depth (in)',yaxis_title='Width (in)',zaxis_title='Height (in)',
-        aspectmode='data'),
-        margin=dict(l=0,r=0,b=0,t=0))
+    fig.update_layout(
+        scene=dict(
+            xaxis_title='Depth (in)', yaxis_title='Width (in)', zaxis_title='Height (in)',
+            aspectmode='data'
+        ),
+        margin=dict(l=0,r=0,b=0,t=0)
+    )
     return fig
 
 # ----------------- Streamlit UI -----------------
@@ -345,53 +387,55 @@ if st.session_state["baggage_list"]:
     st.table(df)
 
     if st.button("Check Fit"):
-        results=[]
-        for i,item in enumerate(st.session_state["baggage_list"],1):
-            box_dims=item["Dims"]
-            door_fit=fits_through_door(box_dims,container["door"])
-            interior_fit=fits_inside(box_dims,container["interior"],container_choice,item.get("Flex",1.0))
-            status="✅ Fits" if door_fit and interior_fit else "❌ Door Fail" if not door_fit else "❌ Interior Fail"
-            results.append({"Type":item["Type"],"Dims":box_dims,"Result":status})
+        results = []
+        for i, item in enumerate(st.session_state["baggage_list"], 1):
+            box_dims = item["Dims"]
+            door_fit = fits_through_door(box_dims, container["door"])
+            interior_fit = fits_inside(box_dims, container["interior"], container_choice, item.get("Flex", 1.0))
+            status = "✅ Fits" if door_fit and interior_fit else "❌ Door Fail" if not door_fit else "❌ Interior Fail"
+            results.append({"Type": item["Type"], "Dims": box_dims, "Result": status})
 
-        results_df=pd.DataFrame(results).reset_index(drop=True)
-        results_df.index=results_df.index+1
-        results_df.index.name="Item"
+        results_df = pd.DataFrame(results).reset_index(drop=True)
+        results_df.index = results_df.index + 1
+        results_df.index.name = "Item"
         st.write("### Fit Results")
         st.table(results_df)
 
-        result=multi_strategy_packing(
-            st.session_state["baggage_list"],container_choice,container["interior"]
+        result = multi_strategy_packing(
+            st.session_state["baggage_list"], container_choice, container["interior"]
         )
 
         st.write("### Overall Cargo Packing Feasibility")
         if result["success"]:
             st.success(f"✅ Packing possible using **{result['strategy']}** strategy.")
         else:
-            st.warning(f"⚠️ Full packing failed. Best strategy was **{result['strategy']}**, "
-                       f"which fit {result['fit_count']} out of {len(st.session_state['baggage_list'])} items.")
+            st.warning(
+                f"⚠️ Full packing failed. Best strategy was **{result['strategy']}**, "
+                f"which fit {result['fit_count']} out of {len(st.session_state['baggage_list'])} items."
+            )
 
-        placements=result["placements"]
+        placements = result["placements"]
 
         if placements:
-            placements_df=pd.DataFrame(placements).reset_index(drop=True)
-            placements_df.index=placements_df.index+1
-            placements_df.index.name="Item"
+            placements_df = pd.DataFrame(placements).reset_index(drop=True)
+            placements_df.index = placements_df.index + 1
+            placements_df.index.name = "Item"
             st.write("### Suggested Placement Positions")
             st.table(placements_df)
 
-            total_bag_vol=sum(bag_volume(item["Dims"]) for item in st.session_state["baggage_list"])
-            hold_vol=cargo_volume(container["interior"],container_choice)
-            utilization=(total_bag_vol/hold_vol)*100
+            total_bag_vol = sum(bag_volume(item["Dims"]) for item in st.session_state["baggage_list"])
+            hold_vol = cargo_volume(container["interior"], container_choice)
+            utilization = (total_bag_vol / hold_vol) * 100
             st.info(f"📦 Estimated Volume Utilization: {utilization:.1f}%")
 
             st.write("### Cargo Load Visualization")
-            if container_choice=="CJ":
-                cargo_dims=(container["interior"]["depth"],
-                            container["interior"]["width"],
-                            container["interior"]["height"])
+            if container_choice == "CJ":
+                cargo_dims = (container["interior"]["depth"],
+                              container["interior"]["width"],
+                              container["interior"]["height"])
             else:
-                cargo_dims=(container["interior"]["depth"],
-                            container["interior"]["width_max"],
-                            container["interior"]["height"])
-            fig=plot_cargo(cargo_dims,placements,container_choice,container["interior"])
-            st.plotly_chart(fig,use_container_width=True)
+                cargo_dims = (container["interior"]["depth"],
+                              container["interior"]["width_max"],
+                              container["interior"]["height"])
+            fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
+            st.plotly_chart(fig, use_container_width=True)
