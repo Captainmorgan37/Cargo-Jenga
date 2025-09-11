@@ -57,7 +57,7 @@ def fits_inside(box_dims, interior, container_type):
             if bh <= interior["height"] and bl <= interior["depth"] and bw <= interior["width"]:
                 return True
         elif container_type == "Legacy":
-            if bh <= interior["height"] and bl <= interior["depth"] and bw <= interior["width_max"]:
+            if bh <= interior["height"] and bl <= interior["depth_max"] and bw <= interior["width_max"]:
                 return True
     return False
 
@@ -80,7 +80,7 @@ def greedy_3d_packing(baggage_list, container_type, interior):
         cargo_W = interior["width"]
         cargo_H = interior["height"]
     else:  # Legacy
-        cargo_L = interior["depth"]
+        cargo_L = interior["depth_max"]
         cargo_W = interior["width_max"]
         cargo_H = interior["height"]
 
@@ -149,14 +149,15 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
 
     # Cargo hold for CJ
     if container_type == "CJ":
+        # Draw explicit edges (12) instead of diagonal
         corners = [
-            (0,0,0), (cargo_L,0,0), (cargo_L,cargo_W,0), (0,cargo_W,0),
-            (0,0,cargo_H), (cargo_L,0,cargo_H), (cargo_L,cargo_W,cargo_H), (0,cargo_W,cargo_H)
+            (0,0,0), (cargo_L,0,0), (cargo_L,cargo_W,0), (0,cargo_W,0),   # bottom
+            (0,0,cargo_H), (cargo_L,0,cargo_H), (cargo_L,cargo_W,cargo_H), (0,cargo_W,cargo_H) # top
         ]
         edges = [
-            (0,1),(1,2),(2,3),(3,0),
-            (4,5),(5,6),(6,7),(7,4),
-            (0,4),(1,5),(2,6),(3,7)
+            (0,1),(1,2),(2,3),(3,0),  # bottom rectangle
+            (4,5),(5,6),(6,7),(7,4),  # top rectangle
+            (0,4),(1,5),(2,6),(3,7)   # verticals
         ]
         for e in edges:
             x = [corners[e[0]][0], corners[e[1]][0]]
@@ -177,8 +178,8 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
         ]
         x, y, z = zip(*vertices)
         faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
-                 (0,1,5),(0,5,4),(1,2,6),(1,6,5),
-                 (2,3,7),(2,7,6),(3,0,4),(3,4,7)]
+                 (0,1,5),(0,5,4),(2,3,7),(2,7,6),
+                 (1,2,6),(1,6,5),(0,3,7),(0,7,4)]
         i, j, k = zip(*faces)
         fig.add_trace(go.Mesh3d(
             x=x, y=y, z=z,
@@ -187,15 +188,16 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
             name='Restricted Area'
         ))
 
-    # Cargo hold for Legacy (rectangular prism with tapered width)
+    # Cargo hold for Legacy (trapezoidal prism)
     if container_type == "Legacy":
-        d = interior["depth"]
+        dmin, dmax = interior["depth_min"], interior["depth_max"]
         wmin, wmax = interior["width_min"], interior["width_max"]
         h = interior["height"]
 
         vertices = [
-            [0, 0, 0], [d, 0, 0], [d, wmin, 0], [0, wmin, 0],
-            [0, 0, h], [d, 0, h], [d, wmax, h], [0, wmax, h]
+            [0, 0, 0], [dmin, 0, 0], [dmin, wmax, 0], [0, wmax, 0],
+            [0, (wmax-wmin)//2, h], [dmax, (wmax-wmin)//2, h],
+            [dmax, (wmax+wmin)//2, h], [0, (wmax+wmin)//2, h]
         ]
         x, y, z = zip(*vertices)
         faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
@@ -301,6 +303,7 @@ if st.session_state["baggage_list"]:
             if container_choice == "CJ":
                 cargo_dims = (container["interior"]["depth"], container["interior"]["width"], container["interior"]["height"])
             else:
-                cargo_dims = (container["interior"]["depth"], container["interior"]["width_max"], container["interior"]["height"])
+                cargo_dims = (container["interior"]["depth_max"], container["interior"]["width_max"], container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
+
