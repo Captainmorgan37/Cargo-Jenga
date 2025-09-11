@@ -150,8 +150,8 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
     # Cargo hold for CJ
     if container_type == "CJ":
         corners = [
-            (0,0,0), (cargo_L,0,0), (cargo_L,cargo_W,0), (0,cargo_W,0),   # bottom
-            (0,0,cargo_H), (cargo_L,0,cargo_H), (cargo_L,cargo_W,cargo_H), (0,cargo_W,cargo_H) # top
+            (0,0,0), (cargo_L,0,0), (cargo_L,cargo_W,0), (0,cargo_W,0),
+            (0,0,cargo_H), (cargo_L,0,cargo_H), (cargo_L,cargo_W,cargo_H), (0,cargo_W,cargo_H)
         ]
         edges = [
             (0,1),(1,2),(2,3),(3,0),
@@ -170,14 +170,15 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
         r = interior["restricted"]
         x0, y0, z0 = 0, cargo_W - r["width"], 0
         x1, y1, z1 = r["depth"], cargo_W, interior["height"]
+
         vertices = [
             [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
             [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]
         ]
         x, y, z = zip(*vertices)
         faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
-                 (0,1,5),(0,5,4),(2,3,7),(2,7,6),
-                 (1,2,6),(1,6,5),(0,3,7),(0,7,4)]
+                 (0,1,5),(0,5,4),(1,2,6),(1,6,5),
+                 (2,3,7),(2,7,6),(3,0,4),(3,4,7)]
         i, j, k = zip(*faces)
         fig.add_trace(go.Mesh3d(
             x=x, y=y, z=z,
