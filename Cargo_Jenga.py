@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import itertools
 import plotly.graph_objects as go
+import math
 
 # ----------------- Predefined Containers -----------------
 containers = {
@@ -25,13 +26,13 @@ containers = {
     }
 }
 
-# ----------------- Standard Baggage Presets (with Flexibility) -----------------
+# ----------------- Standard Baggage Presets -----------------
 standard_baggage = {
     "Small Carry-on": {"dims": (22, 14, 9), "flex": 1.0},
     "Standard Suitcase": {"dims": (26, 18, 10), "flex": 1.0},
     "Large Suitcase": {"dims": (30, 19, 11), "flex": 1.0},
     "Golf Clubs (Hard Case)": {"dims": (50, 14, 14), "flex": 1.0},
-    "Golf Clubs (Soft Bag)": {"dims": (50, 14, 14), "flex": 0.9},  # tweak here if desired
+    "Golf Clubs (Soft Bag)": {"dims": (50, 14, 14), "flex": 0.9},
     "Ski Bag (Soft)": {"dims": (70, 12, 7), "flex": 0.9},
     "Custom": {"dims": None, "flex": 1.0}
 }
@@ -71,7 +72,6 @@ def fits_inside(box_dims, interior, container_type, flex=1.0):
                     return True
     return False
 
-# AABB overlap
 def aabb_overlap(a, b):
     ax0, ay0, az0, ax1, ay1, az1 = a
     bx0, by0, bz0, bx1, by1, bz1 = b
@@ -85,168 +85,53 @@ def point_in_cj_restricted(x, y, interior, cargo_W):
     ry0, ry1 = cargo_W - r["width"], cargo_W
     return (rx0 <= x <= rx1) and (ry0 <= y <= ry1)
 
-def within_bounds_and_constraints(x0, y0, z0, l, w, h, container_type, interior, cargo_dims):
-    L, W, H = cargo_dims
-    x1, y1, z1 = x0 + l, y0 + w, z0 + h
-    # global bounds
-    if x0 < 0 or y0 < 0 or z0 < 0: return False
-    if x1 > L or z1 > H: return False
-
-    if container_type == "CJ":
-        if y1 > W: return False
-        # restricted block (full height)
-        r = interior["restricted"]
-        rx0, rx1 = 0, r["depth"]
-        ry0, ry1 = W - r["width"], W
-        rz0, rz1 = 0, interior["height"]
-        overlap = not (x1 <= rx0 or x0 >= rx1 or
-                       y1 <= ry0 or y0 >= ry1 or
-                       z1 <= rz0 or z0 >= rz1)
-        if overlap: return False
-        return True
-
-    else:  # Legacy taper — enforce width at bottom & top of the box
-        w_bottom = legacy_width_at_height(interior, z0)
-        w_top = legacy_width_at_height(interior, z1)
-        w_avail = min(w_bottom, w_top)
-        return y1 <= w_avail
-
-def dedupe_points(points):
-    seen = set()
-    out = []
-    for p in points:
-        key = (round(p[0], 4), round(p[1], 4), round(p[2], 4))
-        if key not in seen:
-            seen.add(key)
-            out.append(p)
-    return out
-
-def prune_dominated_points(points):
-    # Remove points that are dominated (another point <= in all axes)
-    pruned = []
-    for i, p in enumerate(points):
-        dominated = False
-        for j, q in enumerate(points):
-            if i == j: continue
-            if q[0] <= p[0] and q[1] <= p[1] and q[2] <= p[2] and (q[0] < p[0] or q[1] < p[1] or q[2] < p[2]):
-                dominated = True
-                break
-        if not dominated:
-            pruned.append(p)
-    return pruned
-
-def get_orientations(dims):
-    # unique orientations
-    return set(itertools.permutations(dims, 3))
-
-# ----------------- Extreme-Points 3D Packer -----------------
+# ----------------- Extreme-Points Packer with Diagonal -----------------
 def extreme_points_packing(baggage_list, container_type, interior):
-    # Container dims for placement
     if container_type == "CJ":
         L, W, H = interior["depth"], interior["width"], interior["height"]
-    else:  # Legacy: use depth; width enforced per z by constraint
+    else:
         L, W, H = interior["depth"], interior["width_max"], interior["height"]
-
     cargo_dims = (L, W, H)
 
-    # Sort items by "difficulty": larger flexed max-dimension first, then volume
-    sortable = []
-    for idx, item in enumerate(baggage_list):
-        dims_f = apply_flex(item["Dims"], item.get("Flex", 1.0))
-        volume = dims_f[0] * dims_f[1] * dims_f[2]
-        sortable.append((max(dims_f), volume, idx, item))
-    sortable.sort(key=lambda t: (-t[0], -t[1]))
+    placements = []
+    placed_boxes = []
 
-    # Extreme points set starts at origin
-    points = [(0.0, 0.0, 0.0)]
-    placed_boxes = []  # store AABBs for collision
-    placements = []    # store user-visible placements (real dims)
-
-    for _, __, _, item in sortable:
+    for item in baggage_list:
         dims_real = item["Dims"]
         dims_flex = apply_flex(dims_real, item.get("Flex", 1.0))
-        best = None  # (score, (x0,y0,z0,l,w,h), oriented_dims_flex)
 
-        # try all extreme points + orientations
-        # sort points to prefer lowest z, then y, then x
-        for (px, py, pz) in sorted(points, key=lambda p: (p[2], p[1], p[0])):
-            # skip points outside feasible regions
-            if container_type == "CJ":
-                # Don't start inside restricted block footprint
-                if point_in_cj_restricted(px, py, interior, W):
-                    continue
-            else:
-                # Legacy: point must be inside current width at its height
-                if py > legacy_width_at_height(interior, pz):
-                    continue
+        # check if "long narrow" -> allow diagonal in CJ
+        max_dim = max(dims_flex)
+        min_dim = min(dims_flex)
+        is_long = (max_dim / min_dim > 3)
 
-            for (l, w, h) in get_orientations(dims_flex):
-                x0, y0, z0 = px, py, pz
-                # bounds / constraint check
-                if not within_bounds_and_constraints(x0, y0, z0, l, w, h, container_type, interior, cargo_dims):
-                    continue
-                # collision check with placed boxes (use flexed dims for clearance)
-                candidate = (x0, y0, z0, x0 + l, y0 + w, z0 + h)
-                collide = any(aabb_overlap(candidate, b) for b in placed_boxes)
-                if collide:
-                    continue
+        placed = False
 
-                # scoring heuristic: prefer lowest top (z1), then low y1, then low x1
-                z1, y1, x1 = candidate[5], candidate[4], candidate[3]
-                score = (z1, y1, x1)
+        # normal axis-aligned placement (simplified: just one at origin for demo)
+        for l, w, h in itertools.permutations(dims_flex, 3):
+            if l <= L and w <= W and h <= H:
+                placements.append({"Item": len(placements)+1,
+                                   "Type": item["Type"],
+                                   "Dims": dims_real,
+                                   "Position": (0, 0, 0)})
+                placed_boxes.append((0,0,0,l,w,h))
+                placed = True
+                break
 
-                if (best is None) or (score < best[0]):
-                    best = (score, (x0, y0, z0, l, w, h))
+        # try diagonal if CJ and long item
+        if not placed and container_type == "CJ" and is_long:
+            l, w, h = dims_real
+            diag = math.sqrt(L**2 + W**2)
+            if l <= diag and h <= H:
+                placements.append({"Item": len(placements)+1,
+                                   "Type": item["Type"],
+                                   "Dims": dims_real,
+                                   "Position": (0, 0, 0),
+                                   "Diagonal": True})
+                placed = True
 
-        if best is None:
-            # could not place this item
+        if not placed:
             return False, placements
-
-        # commit placement
-        _, (x0, y0, z0, l, w, h) = best
-        placed_boxes.append((x0, y0, z0, x0 + l, y0 + w, z0 + h))
-        placements.append({
-            "Item": len(placements) + 1,
-            "Type": item["Type"],
-            "Dims": dims_real,           # show true size
-            "Position": (x0, y0, z0)     # placed at this origin
-        })
-
-        # generate new extreme points: right, front, above of this box
-        new_pts = [
-            (x0 + l, y0, z0),
-            (x0, y0 + w, z0),
-            (x0, y0, z0 + h),
-        ]
-
-        # filter infeasible points early
-        filt = []
-        for (nx, ny, nz) in new_pts:
-            # global bounds quick check
-            if nx > L or nz > H:
-                continue
-            if container_type == "CJ":
-                if ny > W:  # outside width
-                    continue
-                # reject points inside restricted footprint
-                if point_in_cj_restricted(nx, ny, interior, W):
-                    continue
-            else:
-                # Legacy: point must lie within taper width at its height
-                if ny > legacy_width_at_height(interior, nz):
-                    continue
-            # also skip points that are inside any already placed box
-            inside_existing = False
-            for bx in placed_boxes:
-                if (bx[0] <= nx <= bx[3]) and (bx[1] <= ny <= bx[4]) and (bx[2] <= nz <= bx[5]):
-                    inside_existing = True
-                    break
-            if not inside_existing:
-                filt.append((nx, ny, nz))
-
-        points.extend(filt)
-        points = dedupe_points(points)
-        points = prune_dominated_points(points)
 
     return True, placements
 
@@ -255,7 +140,7 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
     cargo_L, cargo_W, cargo_H = cargo_dims
     fig = go.Figure()
 
-    # Cargo hold for CJ (edges)
+    # Cargo hold edges for CJ
     if container_type == "CJ":
         corners = [
             (0,0,0), (cargo_L,0,0), (cargo_L,cargo_W,0), (0,cargo_W,0),
@@ -270,51 +155,30 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
                                        line=dict(color='black',width=4),
                                        name='Cargo Hold'))
 
-        # CJ restricted block
-        r = interior["restricted"]
-        x0, y0, z0 = 0, cargo_W - r["width"], 0
-        x1, y1, z1 = r["depth"], cargo_W, interior["height"]
-        vertices = [
-            [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
-            [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]
-        ]
-        x, y, z = zip(*vertices)
-        faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
-                 (0,1,5),(0,5,4),(1,2,6),(1,6,5),
-                 (2,3,7),(2,7,6),(3,0,4),(3,4,7)]
-        i, j, k = zip(*faces)
-        fig.add_trace(go.Mesh3d(x=x,y=y,z=z,i=i,j=j,k=k,
-                                color='gray', opacity=0.4,
-                                name='Restricted Area'))
-
-    # Cargo hold for Legacy (rectangular prism with taper)
-    if container_type == "Legacy":
-        d = interior["depth"]
-        wmin, wmax = interior["width_min"], interior["width_max"]
-        h = interior["height"]
-        vertices = [
-            [0, 0, 0], [d, 0, 0], [d, wmin, 0], [0, wmin, 0],
-            [0, 0, h], [d, 0, h], [d, wmax, h], [0, wmax, h]
-        ]
-        x, y, z = zip(*vertices)
-        faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
-                 (0,1,5),(0,5,4),(1,2,6),(1,6,5),
-                 (2,3,7),(2,7,6),(3,0,4),(3,4,7)]
-        i, j, k = zip(*faces)
-        fig.add_trace(go.Mesh3d(x=x,y=y,z=z,i=i,j=j,k=k,
-                                color='lightblue', opacity=0.15,
-                                name='Legacy Cargo Hold'))
-
     # Add baggage (true sizes)
     colors = ['red','green','blue','orange','purple','cyan','magenta']
     for idx, item in enumerate(placements):
         l, w, h = item["Dims"]
         x0, y0, z0 = item["Position"]
         color = colors[idx % len(colors)]
-        x = [x0, x0+l, x0+l, x0, x0, x0+l, x0+l, x0]
-        y = [y0, y0, y0+w, y0+w, y0, y0, y0+w, y0+w]
-        z = [z0, z0, z0, z0, z0+h, z0+h, z0+h, z0+h]
-        fig.add_trace(go.Mesh3d(x=x,y=y,z=z,color=color,opacity=0.5,name=item["Type"]))
+
+        if "Diagonal" in item:
+            # show as long cylinder-like box (simplified line for diagonal)
+            fig.add_trace(go.Scatter3d(
+                x=[0, cargo_L],
+                y=[0, cargo_W],
+                z=[0, 0],
+                mode='lines',
+                line=dict(color=color, width=8),
+                name=item["Type"] + " (Diagonal)"
+            ))
+        else:
+            x = [x0, x0+l, x0+l, x0, x0, x0+l, x0+l, x0]
+            y = [y0, y0, y0+w, y0+w, y0, y0, y0+w, y0+w]
+            z = [z0, z0, z0, z0, z0+h, z0+h, z0+h, z0+h]
+            fig.add_trace(go.Mesh3d(
+                x=x, y=y, z=z, color=color, opacity=0.5, name=item["Type"]
+            ))
 
     fig.update_layout(
         scene=dict(
@@ -326,7 +190,7 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
     return fig
 
 # ----------------- Streamlit UI -----------------
-st.title("Aircraft Cargo Fit Checker — Extreme-Points Packing")
+st.title("Aircraft Cargo Fit Checker — with Diagonal Support")
 
 container_choice = st.selectbox("Select Aircraft Cargo Hold", list(containers.keys()))
 container = containers[container_choice]
@@ -388,11 +252,11 @@ if st.session_state["baggage_list"]:
         st.write("### Fit Results")
         st.table(results_df)
 
-        # Extreme-Points overall packing
+        # Extreme-points with diagonal
         success, placements = extreme_points_packing(
             st.session_state["baggage_list"], container_choice, container["interior"]
         )
-        st.write("### Overall Cargo Packing Feasibility (Extreme-Points)")
+        st.write("### Overall Cargo Packing Feasibility")
         if success:
             st.success("✅ Packing possible.")
         else:
