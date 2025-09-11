@@ -31,7 +31,7 @@ standard_baggage = {
     "Standard Suitcase": {"dims": (26, 18, 10), "flex": 1.0},
     "Large Suitcase": {"dims": (30, 19, 11), "flex": 1.0},
     "Golf Clubs (Hard Case)": {"dims": (50, 14, 14), "flex": 1.0},
-    "Golf Clubs (Soft Bag)": {"dims": (50, 14, 14), "flex": 0.85},  # squishable
+    "Golf Clubs (Soft Bag)": {"dims": (50, 14, 14), "flex": 0.9},  # squishable
     "Ski Bag (Soft)": {"dims": (70, 12, 7), "flex": 0.9},
     "Custom": {"dims": None, "flex": 1.0}
 }
@@ -324,3 +324,4 @@ if st.session_state["baggage_list"]:
                               container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
+
