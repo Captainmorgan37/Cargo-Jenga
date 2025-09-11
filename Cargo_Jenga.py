@@ -44,8 +44,8 @@ standard_baggage = {
     "Small Carry-on": {"dims": (22, 14, 9), "flex": 1.0},
     "Standard Suitcase": {"dims": (26, 18, 10), "flex": 1.0},
     "Large Suitcase": {"dims": (30, 19, 11), "flex": 1.0},
-    "Golf Clubs (Hard Case)": {"dims": (55, 12, 13), "flex": 1.0},
-    "Golf Clubs (Soft Bag)": {"dims": (55, 12, 13), "flex": 0.9},
+    "Golf Clubs (Hard Case)": {"dims": (55, 13, 13), "flex": 1.0},
+    "Golf Clubs (Soft Bag)": {"dims": (55, 13, 13), "flex": 0.9},
     "Ski Bag (Soft)": {"dims": (70, 12, 7), "flex": 0.9},
     "Custom": {"dims": None, "flex": 1.0}
 }
@@ -525,4 +525,5 @@ if st.session_state["baggage_list"]:
             # Debug expander (optional)
             with st.expander("🔎 Debug data (raw placements)"):
                 st.json(placements)
+
 
