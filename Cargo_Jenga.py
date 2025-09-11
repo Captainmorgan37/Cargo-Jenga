@@ -89,22 +89,40 @@ def fits_inside(box_dims, interior, container_type, flex=1.0):
 def greedy_3d_packing(baggage_list, container_type, interior):
     placements = []
 
-    if container_type == "CJ":
-        cargo_L = interior["depth"]    # x axis
-        cargo_W = interior["width"]    # y axis
-        cargo_H = interior["height"]   # z axis
+    if container_type == "CJ" and max(dims_flex) >= 50:
+        # Force orientation: (depth, width, height) = (thickness, length, height)
+        l, w, h = dims_flex
+        # Pick axes manually
+        tunnel_depth = interior["tunnel"]["depth"]
+        tunnel_width = interior["tunnel"]["width"]
+    
+        oriented = None
+        # Assume the longest dimension must go along y (tunnel width)
+        long_dim = max(dims_flex)
+        other_dims = [d for d in dims_flex if d != long_dim] or [dims_flex[0], dims_flex[1]]
+        if long_dim <= tunnel_width and max(other_dims) <= tunnel_depth and min(other_dims) <= cargo_H:
+            oriented = (min(other_dims), long_dim, max(other_dims))  # (x,y,z)
+    
+        if oriented:
+            dx, dy, dz = oriented
+            x0 = t_x0
+            y0 = t_y0 + t_y_cursor
+            z0 = t_z0 + t_z_cursor
+            placements.append({
+                "Item": i + 1,
+                "Type": item["Type"],
+                "Dims": item["Dims"],
+                "Position": (x0, y0, z0),
+            })
+            # Advance along y (the long tunnel run)
+            t_y_cursor += dy
+            t_row_height = max(t_row_height, dz)
+            if t_y_cursor > tunnel_width + 1e-6:
+                t_y_cursor = 0.0
+                t_z_cursor += t_row_height
+                t_row_height = 0.0
+            placed = True
 
-        # Tunnel geometry (back wall, left side)
-        t_depth = interior["tunnel"]["depth"]  # along x
-        t_width = interior["tunnel"]["width"]  # along y
-        t_x0 = cargo_L - t_depth               # back wall
-        t_y0 = 0                               # left edge
-        t_z0 = 0
-
-        # Tunnel cursors (lay across width, then add layers)
-        t_y_cursor = 0.0
-        t_z_cursor = 0.0
-        t_row_height = 0.0
 
     else:  # Legacy
         cargo_L = interior["depth"]
@@ -447,3 +465,4 @@ if st.session_state["baggage_list"]:
                               container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
+
