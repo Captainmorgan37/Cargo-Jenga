@@ -91,21 +91,28 @@ def greedy_3d_packing(baggage_list, container_type, interior):
     placements = []
 
     if container_type == "CJ":
-        cargo_L = interior["depth"]    # x
-        cargo_W = interior["width"]    # y
-        cargo_H = interior["height"]   # z
+        longish = max(dims_flex) >= 50  # golf/ski bags
+        if longish:
+            tunnel = interior["tunnel"]
+            tunnel_space = (tunnel["depth"], tunnel["width"] - t_y_cursor, cargo_H - t_z_cursor)
+            oriented = fits_in_space(dims_flex, tunnel_space)
+            if oriented:
+                l, w, h = oriented
+                x0 = cargo_L - tunnel["depth"]       # at back wall
+                y0 = t_y_cursor                      # laid out along width
+                z0 = t_z_cursor
+                placements.append({
+                    "Item": i+1, "Type": item["Type"], "Dims": item["Dims"],
+                    "Position": (x0, y0, z0)
+                })
+                t_y_cursor += w
+                t_row_height = max(t_row_height, h)
+                if t_y_cursor > tunnel["width"]:
+                    t_y_cursor = 0
+                    t_z_cursor += t_row_height
+                    t_row_height = 0
+                placed = True
 
-        # Tunnel geometry (against back wall, along left side)
-        t_depth = interior["tunnel"]["depth"]  # along x
-        t_width = interior["tunnel"]["width"]  # along y
-        t_x0 = cargo_L - t_depth               # start near back wall
-        t_y0 = 0                               # left edge
-        t_z0 = 0
-
-        # Tunnel cursors (lay out along y, then z)
-        t_y_cursor = 0.0
-        t_z_cursor = 0.0
-        t_row_height = 0.0
 
     else:  # Legacy
         cargo_L = interior["depth"]
@@ -286,13 +293,12 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
         t_width = interior["tunnel"]["width"]
         t_x0 = cargo_L - t_depth
         t_y0 = 0
-        tL = t_depth
-        tW = t_width
         tH = cargo_H
         vertices = [
-            [t_x0, t_y0, 0],            [t_x0 + tL, t_y0, 0],       [t_x0 + tL, t_y0 + tW, 0],       [t_x0, t_y0 + tW, 0],
-            [t_x0, t_y0, tH],           [t_x0 + tL, t_y0, tH],      [t_x0 + tL, t_y0 + tW, tH],      [t_x0, t_y0 + tW, tH]
+            [t_x0, t_y0, 0], [t_x0 + t_depth, t_y0, 0], [t_x0 + t_depth, t_y0 + t_width, 0], [t_x0, t_y0 + t_width, 0],
+            [t_x0, t_y0, tH], [t_x0 + t_depth, t_y0, tH], [t_x0 + t_depth, t_y0 + t_width, tH], [t_x0, t_y0 + t_width, tH]
         ]
+
         x,y,z = zip(*vertices)
         faces = [(0,1,2),(0,2,3),(4,5,6),(4,6,7),
                  (0,1,5),(0,5,4),(1,2,6),(1,6,5),
@@ -439,3 +445,4 @@ if st.session_state["baggage_list"]:
                               container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
+
