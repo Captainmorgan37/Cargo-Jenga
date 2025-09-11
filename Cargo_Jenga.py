@@ -334,14 +334,19 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
     # Add baggage
     colors = ['red','green','blue','orange','purple','cyan','magenta']
     for idx, item in enumerate(placements):
+        # Dims are already oriented if this is a Tunnel placement
         l, w, h = item["Dims"]
         x0, y0, z0 = item["Position"]
         color = colors[idx % len(colors)]
         x = [x0, x0+l, x0+l, x0, x0, x0+l, x0+l, x0]
         y = [y0, y0, y0+w, y0+w, y0, y0, y0+w, y0+w]
         z = [z0, z0, z0, z0, z0+h, z0+h, z0+h, z0+h]
-        fig.add_trace(go.Mesh3d(x=x, y=y, z=z, color=color, opacity=0.5, name=item["Type"]))
-
+        fig.add_trace(go.Mesh3d(
+            x=x, y=y, z=z,
+            color=color, opacity=0.5,
+            name=f"{item['Type']} ({item.get('Section','Main')})"
+        ))
+    
     fig.update_layout(
         scene=dict(
             xaxis_title='Depth (in)', yaxis_title='Width (in)', zaxis_title='Height (in)',
@@ -350,6 +355,7 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
         margin=dict(l=0, r=0, b=0, t=0)
     )
     return fig
+
 
 # ----------------- Streamlit UI -----------------
 st.title("Aircraft Cargo Fit Checker")
@@ -453,6 +459,7 @@ if st.session_state["baggage_list"]:
                               container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
+
 
 
 
