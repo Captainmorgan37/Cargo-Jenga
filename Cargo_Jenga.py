@@ -31,8 +31,8 @@ standard_baggage = {
     "Standard Suitcase": {"dims": (26, 18, 10), "flex": 1.0},
     "Large Suitcase": {"dims": (30, 19, 11), "flex": 1.0},
     "Golf Clubs (Hard Case)": {"dims": (50, 14, 14), "flex": 1.0},
-    "Golf Clubs (Soft Bag)": {"dims": (50, 14, 14), "flex": 0.93},  # squishable
-    "Ski Bag (Soft)": {"dims": (70, 12, 7), "flex": 0.93},
+    "Golf Clubs (Soft Bag)": {"dims": (50, 14, 14), "flex": 0.9},  # squishable
+    "Ski Bag (Soft)": {"dims": (70, 12, 7), "flex": 0.9},
     "Custom": {"dims": None, "flex": 1.0}
 }
 
@@ -284,9 +284,11 @@ if st.button("Add Item"):
         st.success(f"Added {qty} × {baggage_type}")
 
 if st.session_state["baggage_list"]:
-    df = pd.DataFrame(st.session_state["baggage_list"])
+    df = pd.DataFrame(st.session_state["baggage_list"]).reset_index(drop=True)
+    df.index = df.index + 1
+    df.index.name = "Item"
     st.write("### Current Baggage Load")
-    st.table(df.reset_index(drop=True))  # 🔹 drop index
+    st.table(df)
 
     if st.button("Check Fit"):
         results = []
@@ -295,10 +297,13 @@ if st.session_state["baggage_list"]:
             door_fit = fits_through_door(box_dims, container["door"])
             interior_fit = fits_inside(box_dims, container["interior"], container_choice, item.get("Flex", 1.0))
             status = "✅ Fits" if door_fit and interior_fit else "❌ Door Fail" if not door_fit else "❌ Interior Fail"
-            results.append({"Item": i, "Type": item["Type"], "Dims": box_dims, "Result": status})
+            results.append({"Type": item["Type"], "Dims": box_dims, "Result": status})
 
+        results_df = pd.DataFrame(results).reset_index(drop=True)
+        results_df.index = results_df.index + 1
+        results_df.index.name = "Item"
         st.write("### Fit Results")
-        st.table(pd.DataFrame(results).reset_index(drop=True))  # 🔹 drop index
+        st.table(results_df)
 
         success, placements = greedy_3d_packing(
             st.session_state["baggage_list"], container_choice, container["interior"]
@@ -310,8 +315,11 @@ if st.session_state["baggage_list"]:
             st.error("❌ Packing failed.")
 
         if placements:
+            placements_df = pd.DataFrame(placements).reset_index(drop=True)
+            placements_df.index = placements_df.index + 1
+            placements_df.index.name = "Item"
             st.write("### Suggested Placement Positions")
-            st.table(pd.DataFrame(placements).reset_index(drop=True))  # 🔹 drop index
+            st.table(placements_df)
 
             st.write("### Cargo Load Visualization")
             if container_choice == "CJ":
@@ -324,6 +332,3 @@ if st.session_state["baggage_list"]:
                               container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
-
-
-
