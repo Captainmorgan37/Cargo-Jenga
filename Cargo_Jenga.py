@@ -25,14 +25,15 @@ containers = {
     }
 }
 
-# ----------------- Standard Baggage Presets -----------------
+# ----------------- Standard Baggage Presets (with Flexibility) -----------------
 standard_baggage = {
-    "Small Carry-on": (22, 14, 9),
-    "Standard Suitcase": (26, 18, 10),
-    "Large Suitcase": (30, 19, 11),
-    "Golf Clubs": (50, 14, 14),
-    "Ski Bag": (70, 12, 7),
-    "Custom": None
+    "Small Carry-on": {"dims": (22, 14, 9), "flex": 1.0},
+    "Standard Suitcase": {"dims": (26, 18, 10), "flex": 1.0},
+    "Large Suitcase": {"dims": (30, 19, 11), "flex": 1.0},
+    "Golf Clubs (Hard Case)": {"dims": (50, 14, 14), "flex": 1.0},
+    "Golf Clubs (Soft Bag)": {"dims": (50, 14, 14), "flex": 0.85},  # squishable
+    "Ski Bag (Soft)": {"dims": (70, 12, 7), "flex": 0.9},
+    "Custom": {"dims": None, "flex": 1.0}
 }
 
 # ----------------- Helper Functions -----------------
@@ -55,8 +56,13 @@ def legacy_width_at_height(interior, z):
     wmin, wmax = interior["width_min"], interior["width_max"]
     return wmin + (wmax - wmin) * (z / h)
 
-def fits_inside(box_dims, interior, container_type):
-    l, w, h = box_dims
+def apply_flex(dims, flex):
+    """Apply flexibility factor to squish bag dimensions (used for fit checks)."""
+    l, w, h = dims
+    return (l * flex, w * flex, h * flex)
+
+def fits_inside(box_dims, interior, container_type, flex=1.0):
+    l, w, h = apply_flex(box_dims, flex)
     for dims in itertools.permutations([l, w, h]):
         bl, bw, bh = dims
         if container_type == "CJ":
@@ -97,11 +103,12 @@ def greedy_3d_packing(baggage_list, container_type, interior):
     max_y_in_row = 0
 
     for i, item in enumerate(baggage_list):
-        box = item["Dims"]
+        # Apply flex factor
+        dims_flex = apply_flex(item["Dims"], item.get("Flex", 1.0))
         placed = False
 
         for attempt in range(3):  # try row, new row, new layer
-            oriented = fits_in_space(box, (cargo_L - x_cursor, cargo_W, cargo_H - z_cursor))
+            oriented = fits_in_space(dims_flex, (cargo_L - x_cursor, cargo_W, cargo_H - z_cursor))
             if oriented:
                 l, w, h = oriented
                 x0, y0, z0 = x_cursor, y_cursor, z_cursor
@@ -121,7 +128,7 @@ def greedy_3d_packing(baggage_list, container_type, interior):
                         oriented = None
                     else:
                         placements.append({"Item": i+1, "Type": item["Type"],
-                                           "Dims": (l, w, h),
+                                           "Dims": item["Dims"],  # show true size
                                            "Position": (x0, y0, z0)})
                         x_cursor += l
                         row_height = max(row_height, h)
@@ -135,7 +142,7 @@ def greedy_3d_packing(baggage_list, container_type, interior):
 
                     if y1 <= w_avail:  # ensure bag stays inside taper
                         placements.append({"Item": i+1, "Type": item["Type"],
-                                           "Dims": (l, w, h),
+                                           "Dims": item["Dims"],  # show true size
                                            "Position": (x0, y0, z0)})
                         x_cursor += l
                         row_height = max(row_height, h)
@@ -219,7 +226,7 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
     # Add baggage
     colors = ['red','green','blue','orange','purple','cyan','magenta']
     for idx, item in enumerate(placements):
-        l, w, h = item["Dims"]
+        l, w, h = item["Dims"]  # show real size, not flexed size
         x0, y0, z0 = item["Position"]
         color = colors[idx % len(colors)]
         x = [x0, x0+l, x0+l, x0, x0, x0+l, x0+l, x0]
@@ -257,8 +264,10 @@ if baggage_type == "Custom":
     width = st.number_input("Width (in)", min_value=1)
     height = st.number_input("Height (in)", min_value=1)
     dims = (length, width, height)
+    flex = 1.0
 else:
-    dims = standard_baggage[baggage_type]
+    dims = standard_baggage[baggage_type]["dims"]
+    flex = standard_baggage[baggage_type]["flex"]
 
 qty = st.number_input("Quantity", min_value=1, value=1)
 
@@ -267,7 +276,11 @@ if st.button("Add Item"):
         st.warning("Please enter dimensions for custom item.")
     else:
         for _ in range(qty):
-            st.session_state["baggage_list"].append({"Type": baggage_type, "Dims": dims})
+            st.session_state["baggage_list"].append({
+                "Type": baggage_type,
+                "Dims": dims,
+                "Flex": flex
+            })
         st.success(f"Added {qty} × {baggage_type}")
 
 if st.session_state["baggage_list"]:
@@ -280,7 +293,7 @@ if st.session_state["baggage_list"]:
         for i, item in enumerate(st.session_state["baggage_list"], 1):
             box_dims = item["Dims"]
             door_fit = fits_through_door(box_dims, container["door"])
-            interior_fit = fits_inside(box_dims, container["interior"], container_choice)
+            interior_fit = fits_inside(box_dims, container["interior"], container_choice, item.get("Flex", 1.0))
             status = "✅ Fits" if door_fit and interior_fit else "❌ Door Fail" if not door_fit else "❌ Interior Fail"
             results.append({"Item": i, "Type": item["Type"], "Dims": box_dims, "Result": status})
 
