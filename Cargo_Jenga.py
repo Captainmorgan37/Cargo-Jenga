@@ -18,9 +18,10 @@ containers = {
         "door": {"width": 34, "height": 22, "diag": 38},
         "interior": {
             "height": 36,
-            "depth": 89,
+            "depth_min": 36,
+            "depth_max": 54,
             "width_min": 36,
-            "width_max": 54
+            "width_max": 89
         }
     }
 }
@@ -306,4 +307,3 @@ if st.session_state["baggage_list"]:
                 cargo_dims = (container["interior"]["depth_max"], container["interior"]["width_max"], container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
-
