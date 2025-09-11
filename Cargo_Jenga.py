@@ -50,7 +50,7 @@ def fits_through_door(box_dims, door):
     return False
 
 def legacy_width_at_height(interior, z):
-    """Linearly interpolate width between bottom and top based on height z."""
+    """Linearly interpolate available width between bottom and top at height z."""
     h = interior["height"]
     wmin, wmax = interior["width_min"], interior["width_max"]
     return wmin + (wmax - wmin) * (z / h)
@@ -64,17 +64,13 @@ def fits_inside(box_dims, interior, container_type):
                 return True
         elif container_type == "Legacy":
             if bl <= interior["depth"] and bh <= interior["height"]:
-                # check against taper at bottom and top of box
+                # check against taper at bottom and top
                 if bw <= min(
                     legacy_width_at_height(interior, 0),
                     legacy_width_at_height(interior, bh)
                 ):
                     return True
     return False
-
-def box_volume(dims):
-    l, w, h = dims
-    return l * w * h
 
 # ----------------- Greedy 3D Packing -----------------
 def fits_in_space(box_dims, space_dims):
@@ -92,7 +88,7 @@ def greedy_3d_packing(baggage_list, container_type, interior):
         cargo_H = interior["height"]
     else:  # Legacy
         cargo_L = interior["depth"]
-        cargo_W = interior["width_max"]  # upper bound
+        cargo_W = interior["width_min"]  # baseline: narrowest width
         cargo_H = interior["height"]
 
     placements = []
@@ -105,7 +101,7 @@ def greedy_3d_packing(baggage_list, container_type, interior):
         placed = False
 
         for attempt in range(3):  # try row, new row, new layer
-            oriented = fits_in_space(box, (cargo_L - x_cursor, cargo_W - y_cursor, cargo_H - z_cursor))
+            oriented = fits_in_space(box, (cargo_L - x_cursor, cargo_W, cargo_H - z_cursor))
             if oriented:
                 l, w, h = oriented
                 x0, y0, z0 = x_cursor, y_cursor, z_cursor
@@ -118,11 +114,14 @@ def greedy_3d_packing(baggage_list, container_type, interior):
                     ry0, ry1 = cargo_W - r["width"], cargo_W
                     rz0, rz1 = 0, interior["height"]
 
-                    overlap = not (x1 <= rx0 or x0 >= rx1 or y1 <= ry0 or y0 >= ry1 or z1 <= rz0 or z0 >= rz1)
+                    overlap = not (x1 <= rx0 or x0 >= rx1 or
+                                   y1 <= ry0 or y0 >= ry1 or
+                                   z1 <= rz0 or z0 >= rz1)
                     if overlap:
                         oriented = None
                     else:
-                        placements.append({"Item": i+1, "Type": item["Type"], "Dims": (l, w, h),
+                        placements.append({"Item": i+1, "Type": item["Type"],
+                                           "Dims": (l, w, h),
                                            "Position": (x0, y0, z0)})
                         x_cursor += l
                         row_height = max(row_height, h)
@@ -130,10 +129,13 @@ def greedy_3d_packing(baggage_list, container_type, interior):
                         placed = True
                         break
                 else:  # Legacy taper check
-                    w_bottom = legacy_width_at_height(interior, z0)
-                    w_top = legacy_width_at_height(interior, z1)
-                    if w <= min(w_bottom, w_top):
-                        placements.append({"Item": i+1, "Type": item["Type"], "Dims": (l, w, h),
+                    w_avail_bottom = legacy_width_at_height(interior, z0)
+                    w_avail_top = legacy_width_at_height(interior, z1)
+                    w_avail = min(w_avail_bottom, w_avail_top)
+
+                    if y1 <= w_avail:  # ensure bag stays inside taper
+                        placements.append({"Item": i+1, "Type": item["Type"],
+                                           "Dims": (l, w, h),
                                            "Position": (x0, y0, z0)})
                         x_cursor += l
                         row_height = max(row_height, h)
@@ -300,8 +302,12 @@ if st.session_state["baggage_list"]:
 
             st.write("### Cargo Load Visualization")
             if container_choice == "CJ":
-                cargo_dims = (container["interior"]["depth"], container["interior"]["width"], container["interior"]["height"])
+                cargo_dims = (container["interior"]["depth"],
+                              container["interior"]["width"],
+                              container["interior"]["height"])
             else:
-                cargo_dims = (container["interior"]["depth"], container["interior"]["width_max"], container["interior"]["height"])
+                cargo_dims = (container["interior"]["depth"],
+                              container["interior"]["width_max"],
+                              container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
