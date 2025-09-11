@@ -122,31 +122,34 @@ def greedy_3d_packing(baggage_list, container_type, interior):
         placed = False
 
         # ---------- CJ tunnel for long items (force orientation) ----------
-        if container_type == "CJ" and max(dims_flex) >= 50:  # heuristic for long bags
-            long_dim = max(dims_flex)                        # must go along y in the tunnel
-            # other two dims are thickness & height; order them to fit (x = thinner)
-            others = sorted([d for d in dims_flex if d != long_dim] or [dims_flex[0], dims_flex[1]])
-            x_size, z_size = others[0], others[-1]           # x <= z
-            # Check remaining tunnel space
-            rem_depth = t_depth
-            rem_width = max(0.0, t_width - t_y_cursor)
-            rem_height = max(0.0, cargo_H - t_z_cursor)
-            if (x_size <= rem_depth) and (long_dim <= rem_width) and (z_size <= rem_height):
+        if container_type == "CJ" and max(dims_flex) >= 50:  # long bag
+            tunnel_depth = interior["tunnel"]["depth"]
+            tunnel_width = interior["tunnel"]["width"]
+        
+            # Force orientation: thickness → x, length → y, height → z
+            length = max(dims_flex)
+            others = sorted([d for d in dims_flex if d != length] or [dims_flex[0], dims_flex[1]])
+            thickness, height = others[0], others[-1]
+        
+            if thickness <= tunnel_depth and length <= (tunnel_width - t_y_cursor) and height <= (cargo_H - t_z_cursor):
                 x0 = t_x0
                 y0 = t_y0 + t_y_cursor
                 z0 = t_z0 + t_z_cursor
                 placements.append({
-                    "Item": i + 1, "Type": item["Type"], "Dims": item["Dims"],
-                    "Position": (x0, y0, z0)
+                    "Item": i + 1,
+                    "Type": item["Type"],
+                    "Dims": item["Dims"],
+                    "Position": (x0, y0, z0),
                 })
-                # advance along tunnel width (y)
-                t_y_cursor += long_dim
-                t_row_height = max(t_row_height, z_size)
-                if t_y_cursor > t_width + 1e-6:
+                # Advance along tunnel width (y axis)
+                t_y_cursor += length
+                t_row_height = max(t_row_height, height)
+                if t_y_cursor > tunnel_width + 1e-6:
                     t_y_cursor = 0.0
                     t_z_cursor += t_row_height
                     t_row_height = 0.0
                 placed = True
+
 
         if placed:
             continue
@@ -439,5 +442,6 @@ if st.session_state["baggage_list"]:
                               container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
+
 
 
