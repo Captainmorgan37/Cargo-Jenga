@@ -31,8 +31,8 @@ standard_baggage = {
     "Standard Suitcase": {"dims": (26, 18, 10), "flex": 1.0},
     "Large Suitcase": {"dims": (30, 19, 11), "flex": 1.0},
     "Golf Clubs (Hard Case)": {"dims": (50, 14, 14), "flex": 1.0},
-    "Golf Clubs (Soft Bag)": {"dims": (50, 14, 14), "flex": 0.9},  # squishable
-    "Ski Bag (Soft)": {"dims": (70, 12, 7), "flex": 0.9},
+    "Golf Clubs (Soft Bag)": {"dims": (50, 14, 14), "flex": 0.92},  # squishable
+    "Ski Bag (Soft)": {"dims": (70, 12, 7), "flex": 0.92},
     "Custom": {"dims": None, "flex": 1.0}
 }
 
@@ -286,7 +286,7 @@ if st.button("Add Item"):
 if st.session_state["baggage_list"]:
     df = pd.DataFrame(st.session_state["baggage_list"])
     st.write("### Current Baggage Load")
-    st.table(df)
+    st.table(df.reset_index(drop=True))  # 🔹 drop index
 
     if st.button("Check Fit"):
         results = []
@@ -298,7 +298,7 @@ if st.session_state["baggage_list"]:
             results.append({"Item": i, "Type": item["Type"], "Dims": box_dims, "Result": status})
 
         st.write("### Fit Results")
-        st.table(pd.DataFrame(results))
+        st.table(pd.DataFrame(results).reset_index(drop=True))  # 🔹 drop index
 
         success, placements = greedy_3d_packing(
             st.session_state["baggage_list"], container_choice, container["interior"]
@@ -311,7 +311,7 @@ if st.session_state["baggage_list"]:
 
         if placements:
             st.write("### Suggested Placement Positions")
-            st.table(pd.DataFrame(placements))
+            st.table(pd.DataFrame(placements).reset_index(drop=True))  # 🔹 drop index
 
             st.write("### Cargo Load Visualization")
             if container_choice == "CJ":
@@ -324,4 +324,3 @@ if st.session_state["baggage_list"]:
                               container["interior"]["height"])
             fig = plot_cargo(cargo_dims, placements, container_choice, container["interior"])
             st.plotly_chart(fig, use_container_width=True)
-
