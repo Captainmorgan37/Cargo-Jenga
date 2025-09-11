@@ -461,7 +461,8 @@ if st.session_state["baggage_list"]:
         with col5:
             if st.button("❌", key=f"remove_{idx}"):
                 st.session_state["baggage_list"].pop(idx-1)
-                st.experimental_rerun()  # refresh immediately
+                st.rerun()  # refresh immediately
+
 
 
     # Fit checks + Packing
@@ -538,6 +539,7 @@ if st.session_state["baggage_list"]:
             # Debug expander (optional)
             with st.expander("🔎 Debug data (raw placements)"):
                 st.json(placements)
+
 
 
 
