@@ -445,11 +445,24 @@ with col4:
 
 # Current Load Table
 if st.session_state["baggage_list"]:
-    df = pd.DataFrame(st.session_state["baggage_list"]).reset_index(drop=True)
-    df.index = df.index + 1
-    df.index.name = "Item"
     st.write("### Current Baggage Load")
-    st.table(df)
+
+    # Show each item with a remove button
+    for idx, bag in enumerate(st.session_state["baggage_list"], start=1):
+        col1, col2, col3, col4, col5 = st.columns([2, 3, 3, 3, 1])
+        with col1:
+            st.write(f"**{idx}**")
+        with col2:
+            st.write(bag["Type"])
+        with col3:
+            st.write(f"{bag['Dims'][0]} × {bag['Dims'][1]} × {bag['Dims'][2]}")
+        with col4:
+            st.write(f"Flex: {bag['Flex']}")
+        with col5:
+            if st.button("❌", key=f"remove_{idx}"):
+                st.session_state["baggage_list"].pop(idx-1)
+                st.experimental_rerun()  # refresh immediately
+
 
     # Fit checks + Packing
     if st.button("Check Fit / Pack"):
@@ -525,6 +538,7 @@ if st.session_state["baggage_list"]:
             # Debug expander (optional)
             with st.expander("🔎 Debug data (raw placements)"):
                 st.json(placements)
+
 
 
 
