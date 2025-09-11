@@ -70,7 +70,6 @@ def fits_inside(box_dims, interior, container_type, flex=1.0):
                 return True
         elif container_type == "Legacy":
             if bl <= interior["depth"] and bh <= interior["height"]:
-                # check against taper at bottom and top
                 if bw <= min(
                     legacy_width_at_height(interior, 0),
                     legacy_width_at_height(interior, bh)
@@ -94,7 +93,7 @@ def greedy_3d_packing(baggage_list, container_type, interior):
         cargo_H = interior["height"]
     else:  # Legacy
         cargo_L = interior["depth"]
-        cargo_W = interior["width_min"]  # baseline: narrowest width
+        cargo_W = interior["width_min"]
         cargo_H = interior["height"]
 
     placements = []
@@ -103,7 +102,6 @@ def greedy_3d_packing(baggage_list, container_type, interior):
     max_y_in_row = 0
 
     for i, item in enumerate(baggage_list):
-        # Apply flex factor
         dims_flex = apply_flex(item["Dims"], item.get("Flex", 1.0))
         placed = False
 
@@ -115,7 +113,6 @@ def greedy_3d_packing(baggage_list, container_type, interior):
                 x1, y1, z1 = x0 + l, y0 + w, z0 + h
 
                 if container_type == "CJ":
-                    # restricted block check
                     r = interior["restricted"]
                     rx0, rx1 = 0, r["depth"]
                     ry0, ry1 = cargo_W - r["width"], cargo_W
@@ -128,7 +125,7 @@ def greedy_3d_packing(baggage_list, container_type, interior):
                         oriented = None
                     else:
                         placements.append({"Item": i+1, "Type": item["Type"],
-                                           "Dims": item["Dims"],  # show true size
+                                           "Dims": item["Dims"],
                                            "Position": (x0, y0, z0)})
                         x_cursor += l
                         row_height = max(row_height, h)
@@ -140,9 +137,9 @@ def greedy_3d_packing(baggage_list, container_type, interior):
                     w_avail_top = legacy_width_at_height(interior, z1)
                     w_avail = min(w_avail_bottom, w_avail_top)
 
-                    if y1 <= w_avail:  # ensure bag stays inside taper
+                    if y1 <= w_avail:
                         placements.append({"Item": i+1, "Type": item["Type"],
-                                           "Dims": item["Dims"],  # show true size
+                                           "Dims": item["Dims"],
                                            "Position": (x0, y0, z0)})
                         x_cursor += l
                         row_height = max(row_height, h)
@@ -167,12 +164,42 @@ def greedy_3d_packing(baggage_list, container_type, interior):
 
     return True, placements
 
+# ----------------- Smarter Multi-Strategy Packing -----------------
+def bag_volume(dims):
+    l, w, h = dims
+    return l * w * h
+
+def multi_strategy_packing(baggage_list, container_type, interior):
+    strategies = {
+        "Original Order": baggage_list,
+        "Largest Volume First": sorted(baggage_list, key=lambda x: bag_volume(x["Dims"]), reverse=True),
+        "Largest Dimension First": sorted(baggage_list, key=lambda x: max(x["Dims"]), reverse=True),
+        "Smallest First": sorted(baggage_list, key=lambda x: bag_volume(x["Dims"]))
+    }
+
+    best_result = {"success": False, "placements": [], "strategy": None, "fit_count": 0}
+
+    for name, bags in strategies.items():
+        success, placements = greedy_3d_packing(bags, container_type, interior)
+        if success:
+            return {"success": True, "placements": placements, "strategy": name, "fit_count": len(placements)}
+        else:
+            if len(placements) > best_result["fit_count"]:
+                best_result = {"success": False, "placements": placements, "strategy": name, "fit_count": len(placements)}
+
+    return best_result
+
+def cargo_volume(interior, container_type):
+    if container_type == "CJ":
+        return interior["depth"] * interior["width"] * interior["height"]
+    else:  # Legacy
+        return interior["depth"] * ((interior["width_min"] + interior["width_max"]) / 2) * interior["height"]
+
 # ----------------- Visualization -----------------
 def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
     cargo_L, cargo_W, cargo_H = cargo_dims
     fig = go.Figure()
 
-    # Cargo hold for CJ
     if container_type == "CJ":
         corners = [
             (0,0,0), (cargo_L,0,0), (cargo_L,cargo_W,0), (0,cargo_W,0),
@@ -187,7 +214,6 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
                                        line=dict(color='black',width=4),
                                        name='Cargo Hold'))
 
-        # Restricted block
         r = interior["restricted"]
         x0, y0, z0 = 0, cargo_W - r["width"], 0
         x1, y1, z1 = r["depth"], cargo_W, interior["height"]
@@ -204,7 +230,6 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
                                 color='gray', opacity=0.4,
                                 name='Restricted Area'))
 
-    # Cargo hold for Legacy (rectangular prism with taper)
     if container_type == "Legacy":
         d = interior["depth"]
         wmin, wmax = interior["width_min"], interior["width_max"]
@@ -223,10 +248,9 @@ def plot_cargo(cargo_dims, placements, container_type=None, interior=None):
                                 color='lightblue', opacity=0.15,
                                 name='Legacy Cargo Hold'))
 
-    # Add baggage
     colors = ['red','green','blue','orange','purple','cyan','magenta']
     for idx, item in enumerate(placements):
-        l, w, h = item["Dims"]  # show real size, not flexed size
+        l, w, h = item["Dims"]
         x0, y0, z0 = item["Position"]
         color = colors[idx % len(colors)]
         x = [x0, x0+l, x0+l, x0, x0, x0+l, x0+l, x0]
@@ -305,14 +329,18 @@ if st.session_state["baggage_list"]:
         st.write("### Fit Results")
         st.table(results_df)
 
-        success, placements = greedy_3d_packing(
+        result = multi_strategy_packing(
             st.session_state["baggage_list"], container_choice, container["interior"]
         )
+
         st.write("### Overall Cargo Packing Feasibility")
-        if success:
-            st.success("✅ Packing possible.")
+        if result["success"]:
+            st.success(f"✅ Packing possible using **{result['strategy']}** strategy.")
         else:
-            st.error("❌ Packing failed.")
+            st.warning(f"⚠️ Full packing failed. Best strategy was **{result['strategy']}**, "
+                       f"which fit {result['fit_count']} out of {len(st.session_state['baggage_list'])} items.")
+
+        placements = result["placements"]
 
         if placements:
             placements_df = pd.DataFrame(placements).reset_index(drop=True)
@@ -320,6 +348,11 @@ if st.session_state["baggage_list"]:
             placements_df.index.name = "Item"
             st.write("### Suggested Placement Positions")
             st.table(placements_df)
+
+            total_bag_vol = sum(bag_volume(item["Dims"]) for item in st.session_state["baggage_list"])
+            hold_vol = cargo_volume(container["interior"], container_choice)
+            utilization = (total_bag_vol / hold_vol) * 100
+            st.info(f"📦 Estimated Volume Utilization: {utilization:.1f}%")
 
             st.write("### Cargo Load Visualization")
             if container_choice == "CJ":
